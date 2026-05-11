@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Atlas "A" icon for splash screen -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,28 L72,72 L64,72 L60,62 L48,62 L44,72 L36,72 Z M51,46 L46,56 L56,56 Z" />
+</vector>

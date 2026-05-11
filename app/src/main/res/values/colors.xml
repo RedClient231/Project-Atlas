@@ -12,15 +12,17 @@
          Primary Palette — Deep Indigo
          ═══════════════════════════════════════════════════════════════ -->
     <color name="primary">#FF1A237E</color>
-    <color name="primary_variant">#FF0D1642</color>
+    <color name="primary_container">#FFDCE1FF</color>
     <color name="on_primary">#FFFFFFFF</color>
+    <color name="on_primary_container">#FF00105C</color>
 
     <!-- ═══════════════════════════════════════════════════════════════
          Secondary Palette — Teal Accent
          ═══════════════════════════════════════════════════════════════ -->
     <color name="secondary">#FF00BFA5</color>
-    <color name="secondary_variant">#FF008E76</color>
+    <color name="secondary_container">#FF5EF7DB</color>
     <color name="on_secondary">#FF000000</color>
+    <color name="on_secondary_container">#FF00201B</color>
 
     <!-- ═══════════════════════════════════════════════════════════════
          Tertiary Palette — Amber Highlight

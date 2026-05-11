@@ -2,26 +2,25 @@
 <!--
   ~ Project Atlas - Android Virtual Space
   ~
-  ~ Material 3 Theme for the Activity
-  ~ DayNight theme with transparent status bar and no action bar.
-  ~ Compose handles its own theming; this is for the Activity window.
+  ~ Material 3 Theme for the Activity window.
+  ~ Compose handles its own theming; this is only for the Activity window backdrop.
   -->
 <resources>
 
-    <!-- ═══════════════════════════════════════════════════════════════
-         Base Application Theme (DayNight)
-         ═══════════════════════════════════════════════════════════════ -->
+    <!-- Base Application Theme (DayNight) -->
     <style name="Theme.Atlas" parent="Theme.Material3.DayNight.NoActionBar">
 
         <!-- Primary brand color -->
         <item name="colorPrimary">@color/primary</item>
-        <item name="colorPrimaryVariant">@color/primary_variant</item>
         <item name="colorOnPrimary">@color/on_primary</item>
+        <item name="colorPrimaryContainer">@color/primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/on_primary_container</item>
 
         <!-- Secondary brand color -->
         <item name="colorSecondary">@color/secondary</item>
-        <item name="colorSecondaryVariant">@color/secondary_variant</item>
         <item name="colorOnSecondary">@color/on_secondary</item>
+        <item name="colorSecondaryContainer">@color/secondary_container</item>
+        <item name="colorOnSecondaryContainer">@color/on_secondary_container</item>
 
         <!-- Tertiary brand color -->
         <item name="colorTertiary">@color/tertiary</item>
@@ -41,16 +40,15 @@
 
         <!-- Outline -->
         <item name="colorOutline">@color/outline</item>
-        <item name="colorOutlineVariant">@color/outline_variant</item>
 
         <!-- Inverse colors -->
         <item name="colorInverseSurface">@color/inverse_surface</item>
         <item name="colorInverseOnSurface">@color/inverse_on_surface</item>
         <item name="colorInversePrimary">@color/inverse_primary</item>
 
-        <!-- Transparent status bar -->
-        <item name="android:statusBarColor">@color/transparent</item>
-        <item name="android:navigationBarColor">@color/transparent</item>
+        <!-- Transparent status/navigation bars -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
 
         <!-- No action bar (Compose handles its own top app bar) -->
         <item name="windowActionBar">false</item>
@@ -59,25 +57,12 @@
         <!-- Edge-to-edge display -->
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
 
-        <!-- Splash screen (Android 12+) -->
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_animated</item>
-        <item name="android:windowSplashScreenBackground">@color/primary</item>
-
-        <!-- Text appearance -->
-        <item name="android:textColorPrimary">@color/on_surface</item>
-        <item name="android:textColorSecondary">@color/on_surface_variant</item>
-
-        <!-- Ripple -->
-        <item name="android:colorControlHighlight">@color/primary_variant</item>
-
     </style>
 
-    <!-- ═══════════════════════════════════════════════════════════════
-         Splash Theme (pre-Android 12 fallback)
-         ═══════════════════════════════════════════════════════════════ -->
+    <!-- Splash Theme (pre-Android 12 fallback) -->
     <style name="Theme.Atlas.Splash" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/primary</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_animated</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_icon</item>
         <item name="postSplashScreenTheme">@style/Theme.Atlas</item>
     </style>
 

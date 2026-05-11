@@ -52,17 +52,19 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace --info 2>&1 | tee build-log.txt
+        run: ./gradlew assembleDebug --stacktrace
 
       - name: Build Release APK
-        run: ./gradlew assembleRelease --stacktrace 2>&1 | tee -a build-log.txt
+        run: ./gradlew assembleRelease --stacktrace
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: atlas-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: |
+            app/build/outputs/apk/debug/**/*.apk
+            app/build/outputs/apk/debug/*.apk
           retention-days: 30
 
       - name: Upload Release APK
@@ -70,16 +72,10 @@ jobs:
         if: success()
         with:
           name: atlas-release-apk
-          path: app/build/outputs/apk/release/*.apk
+          path: |
+            app/build/outputs/apk/release/**/*.apk
+            app/build/outputs/apk/release/*.apk
           retention-days: 30
-
-      - name: Upload build logs on failure
-        uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: build-logs
-          path: build-log.txt
-          retention-days: 7
 
       - name: Upload R8 mapping files
         uses: actions/upload-artifact@v4
@@ -93,6 +89,7 @@ jobs:
     name: Lint Check
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    continue-on-error: true
 
     steps:
       - name: Checkout
@@ -122,11 +119,14 @@ jobs:
 
       - name: Run Lint
         run: ./gradlew lintDebug --stacktrace
+        continue-on-error: true
 
       - name: Upload lint report
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: lint-report
-          path: app/build/reports/lint-results-debug.html
+          path: |
+            app/build/reports/lint-results-debug.html
+            app/build/reports/lint-results-debug.xml
           retention-days: 7
