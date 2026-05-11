@@ -53,3 +53,5 @@ Thumbs.db
 # Secrets
 *.env
 secrets.properties
+jdk/
+jdk
