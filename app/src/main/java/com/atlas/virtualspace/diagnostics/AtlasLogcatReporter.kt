@@ -261,8 +261,9 @@ object AtlasLogcatReporter {
                 var line: String?
                 var totalSize = 0L
                 while (reader.readLine().also { line = it } != null) {
-                    output.appendLine(line)
-                    totalSize += line.length
+                    val currentLine = line ?: break
+                    output.appendLine(currentLine)
+                    totalSize += currentLine.length
                     if (totalSize > MAX_LOGCAT_SIZE) break
                 }
             }
