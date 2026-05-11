@@ -510,9 +510,12 @@ object ShizukuIntegration {
                 Shizuku.getBinder() != null -> "available"
                 else -> "not_installed"
             }
-        } catch (e: ClassNotFoundException) -> "not_installed"
-        catch (e: NoClassDefFoundError) -> "not_installed"
-        catch (e: Exception) -> "unknown"
+        } catch (e: Exception) {
+            when (e) {
+                is ClassNotFoundException, is NoClassDefFoundError -> "not_installed"
+                else -> "unknown"
+            }
+        }
     }
 
     /**
