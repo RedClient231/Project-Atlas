@@ -1,0 +1,3 @@
+# ninja log v5
+0	1122	1778521820889830283	CMakeFiles/atlas_native.dir/atlas_native.cpp.o	eae42235efc9df5e
+1122	1144	1778521820916830502	/home/z/my-project/Project-Atlas/app/build/intermediates/cxx/RelWithDebInfo/2k4w9628/obj/arm64-v8a/libatlas_native.so	1f9b7b9155c38342

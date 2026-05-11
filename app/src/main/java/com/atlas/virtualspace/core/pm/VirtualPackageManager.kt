@@ -460,34 +460,62 @@ object VirtualPackageManager {
      * 3. Last resort: return null (the app cannot be launched).
      */
     private fun resolveLaunchActivityFromApk(apk: ApkFile, packageName: String): String? {
-        // Strategy 1: Parse the APK manifest directly.
+        // Strategy 1: Use apk-parser's ApkMeta to get the launchable activity.
+        // The apk-parser library (2.6.10) exposes launch activities via
+        // the ApkMeta object itself. We try to find an activity with
+        // ACTION_MAIN + CATEGORY_LAUNCHER intent filters.
         try {
-            val manifest = apk.apkMeta
-            // apk-parser provides the launchable activity name via ApkMeta
-            // Some versions of apk-parser expose this directly.
-            // Check if there are activity entries with launcher intent filters.
-            val activities = apk.apkMeta.activities
-            if (activities != null && activities.isNotEmpty()) {
-                // Look for activities with LAUNCHER category
-                for (activity in activities) {
-                    val intentFilters = activity.intentFilters
-                    if (intentFilters != null) {
-                        for (filter in intentFilters) {
-                            val hasMainAction = filter.actions?.any { it == "android.intent.action.MAIN" } == true
-                            val hasLauncherCategory = filter.categories?.any { it == "android.intent.category.LAUNCHER" } == true
-                            if (hasMainAction && hasLauncherCategory) {
-                                // apk-parser returns activity names that may need package prefix
-                                var activityName = activity.name
-                                if (activityName.startsWith(".")) {
-                                    activityName = "$packageName$activityName"
-                                } else if (!activityName.contains(".")) {
-                                    activityName = "$packageName.$activityName"
+            val meta = apk.apkMeta
+
+            // Try using reflection to access activity list since the API
+            // varies between apk-parser versions. The launchable activity
+            // is typically the one with MAIN/LAUNCHER intent filter.
+            // ApkParser 2.6.10 stores activities in ApkMeta.
+            try {
+                val activitiesField = ApkMeta::class.java.getDeclaredField("activities")
+                activitiesField.isAccessible = true
+                @Suppress("UNCHECKED_CAST")
+                val activities = activitiesField.get(meta) as? List<*>
+                if (activities != null && activities.isNotEmpty()) {
+                    for (activityObj in activities) {
+                        if (activityObj == null) continue
+                        val nameField = activityObj.javaClass.getDeclaredField("name")
+                        nameField.isAccessible = true
+                        val activityName = nameField.get(activityObj) as? String ?: continue
+
+                        val intentFiltersField = activityObj.javaClass.getDeclaredField("intentFilters")
+                        intentFiltersField.isAccessible = true
+                        @Suppress("UNCHECKED_CAST")
+                        val filters = intentFiltersField.get(activityObj) as? List<*>
+                        if (filters != null) {
+                            for (filterObj in filters) {
+                                if (filterObj == null) continue
+                                val actionsField = filterObj.javaClass.getDeclaredField("actions")
+                                actionsField.isAccessible = true
+                                @Suppress("UNCHECKED_CAST")
+                                val actions = actionsField.get(filterObj) as? List<String>
+                                val categoriesField = filterObj.javaClass.getDeclaredField("categories")
+                                categoriesField.isAccessible = true
+                                @Suppress("UNCHECKED_CAST")
+                                val categories = categoriesField.get(filterObj) as? List<String>
+
+                                val hasMainAction = actions?.any { it == "android.intent.action.MAIN" } == true
+                                val hasLauncherCategory = categories?.any { it == "android.intent.category.LAUNCHER" } == true
+                                if (hasMainAction && hasLauncherCategory) {
+                                    var resolvedName = activityName
+                                    if (resolvedName.startsWith(".")) {
+                                        resolvedName = "$packageName$resolvedName"
+                                    } else if (!resolvedName.contains(".")) {
+                                        resolvedName = "$packageName.$resolvedName"
+                                    }
+                                    return resolvedName
                                 }
-                                return activityName
                             }
                         }
                     }
                 }
+            } catch (refEx: Exception) {
+                Timber.d(refEx, "Reflection-based activity lookup failed, trying fallback")
             }
         } catch (e: Exception) {
             Timber.w(e, "Failed to parse launch activity from APK manifest")

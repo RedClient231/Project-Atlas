@@ -31,8 +31,8 @@ android {
         applicationId = "com.atlas.virtualspace"
         minSdk = 33  // Android 13+
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0-alpha"
+        versionCode = 2
+        versionName = "1.0.0"
 
         // Support both 32-bit and 64-bit for game compatibility
         ndk {
@@ -60,6 +60,16 @@ android {
         }
     }
 
+    // Signing configuration
+    signingConfigs {
+        create("release") {
+            storeFile = file("../atlas-release.jks")
+            storePassword = "atlas2024"
+            keyAlias = "atlas"
+            keyPassword = "atlas2024"
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
@@ -68,11 +78,12 @@ android {
             buildConfigField("boolean", "ENABLE_HOOK_DEBUG", "true")
         }
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            isMinifyEnabled = false   // Disable R8 minification to prevent runtime crashes
+            isShrinkResources = false  // Disable resource shrinking too
             isCrunchPngs = true
-            buildConfigField("boolean", "ENABLE_LOGCAT", "false")
-            buildConfigField("boolean", "ENABLE_HOOK_DEBUG", "false")
+            signingConfig = signingConfigs.getByName("release")
+            buildConfigField("boolean", "ENABLE_LOGCAT", "true")   // Enable logcat for debugging
+            buildConfigField("boolean", "ENABLE_HOOK_DEBUG", "true")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
