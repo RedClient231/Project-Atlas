@@ -158,21 +158,24 @@ class HomeViewModel @Inject constructor(
             withContext(Dispatchers.Main) {
                 try {
                     val appInfo = VirtualPackageManager.getAppInfo(packageName) ?: return@withContext
-                    val shortcutIntent = appInfo.launchActivity?.let { activity ->
-                        Intent(Intent.ACTION_MAIN).apply {
-                            component = android.content.ComponentName(packageName, activity)
-                            addCategory(Intent.CATEGORY_LAUNCHER)
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                                    Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
-                        }
-                    } ?: return@withContext
+                    val launchActivity = appInfo.launchActivity ?: return@withContext
+
+                    // The shortcut should launch VirtualStubActivity with extras
+                    // identifying the target package and activity.
+                    val shortcutIntent = Intent(appContext, com.atlas.virtualspace.core.engine.VirtualStubActivity::class.java).apply {
+                        action = Intent.ACTION_MAIN
+                        putExtra(com.atlas.virtualspace.core.engine.VirtualStubActivity.EXTRA_PACKAGE_NAME, packageName)
+                        putExtra(com.atlas.virtualspace.core.engine.VirtualStubActivity.EXTRA_ACTIVITY_CLASS, launchActivity)
+                        putExtra(com.atlas.virtualspace.core.engine.VirtualStubActivity.EXTRA_VIRTUAL_LAUNCH, true)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                    }
 
                     val shortcut = android.content.pm.ShortcutInfo.Builder(
                         appContext,
                         "atlas_$packageName"
                     )
                         .setShortLabel(appInfo.appName)
-                        .setLongLabel(appInfo.appName)
+                        .setLongLabel("${appInfo.appName} (Atlas)")
                         .setIntent(shortcutIntent)
                         .build()
 

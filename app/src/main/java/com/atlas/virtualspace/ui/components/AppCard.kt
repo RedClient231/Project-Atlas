@@ -1,6 +1,9 @@
 package com.atlas.virtualspace.ui.components
 
+import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +25,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,14 +34,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
 import com.atlas.virtualspace.R
 import com.atlas.virtualspace.core.pm.VirtualAppInfo
+import com.atlas.virtualspace.core.pm.VirtualPackageManager
 import com.atlas.virtualspace.ui.theme.AtlasRunningIndicator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.graphics.asImageBitmap
 
 /**
  * Reusable card that represents a single virtual app in the home grid.
@@ -47,7 +55,7 @@ import com.atlas.virtualspace.ui.theme.AtlasRunningIndicator
  * @param onLaunch       Callback when the user taps the Launch button.
  * @param onShortcut     Callback when "Create Shortcut" is selected.
  * @param onClearData    Callback when "Clear Data" is selected.
- * @param onUninstall    Callback when "Uninstall" is selected.
+ * @param onUninstall    Callback when the user selects "Uninstall".
  * @param onLongPress    Callback when the card is long-pressed (quick-actions).
  * @param modifier       Optional modifier.
  */
@@ -81,16 +89,41 @@ fun AppCard(
         ) {
             // ── Icon + running indicator ────────────────────────────────
             Box(contentAlignment = Alignment.TopEnd) {
-                AsyncImage(
-                    model = app.apkPath,
-                    contentDescription = app.appName,
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(MaterialTheme.shapes.small),
-                    contentScale = ContentScale.Fit,
-                    placeholder = painterResource(R.drawable.ic_app_placeholder),
-                    error = painterResource(R.drawable.ic_app_placeholder),
-                )
+                val context = LocalContext.current
+                var appIcon by remember(app.packageName) {
+                    mutableStateOf<Bitmap?>(null)
+                }
+
+                LaunchedEffect(app.packageName) {
+                    withContext(Dispatchers.IO) {
+                        try {
+                            val drawable = VirtualPackageManager.getAppIcon(app.packageName)
+                            if (drawable is BitmapDrawable) {
+                                appIcon = drawable.bitmap
+                            }
+                        } catch (_: Exception) { }
+                    }
+                }
+
+                if (appIcon != null) {
+                    Image(
+                        bitmap = appIcon!!.asImageBitmap(),
+                        contentDescription = app.appName,
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(MaterialTheme.shapes.small),
+                        contentScale = ContentScale.Fit,
+                    )
+                } else {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_app_placeholder),
+                        contentDescription = app.appName,
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(MaterialTheme.shapes.small),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
 
                 if (isRunning) {
                     Box(

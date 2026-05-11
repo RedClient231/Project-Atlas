@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import net.dongliu.apk.parser.ApkFile
 import net.dongliu.apk.parser.bean.ApkMeta
+import timber.log.Timber
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -213,7 +214,8 @@ object VirtualPackageManager {
      * 3. Tears down mount points
      */
     fun uninstallApp(packageName: String): Result<Unit> = runCatching {
-        // 1. Delete from database
+        // 1. Delete from database FIRST — this is the most critical step
+        //    and should succeed even if storage cleanup fails
         try {
             runBlocking(Dispatchers.IO) {
                 dao.deleteByPackage(packageName)
@@ -222,11 +224,11 @@ object VirtualPackageManager {
             Timber.w(e, "Database delete failed for %s, continuing with storage cleanup", packageName)
         }
 
-        // 2. Delete virtual storage
+        // 2. Delete virtual storage (non-fatal — data may already be gone)
         try {
             VirtualFileSystem.deleteAppStorage(packageName).getOrThrow()
         } catch (e: Exception) {
-            Timber.w(e, "Storage delete failed for %s", packageName)
+            Timber.w(e, "Storage delete failed for %s (may already be removed)", packageName)
         }
 
         // 3. Tear down mount points (non-fatal)
@@ -235,6 +237,8 @@ object VirtualPackageManager {
         } catch (e: Exception) {
             Timber.w(e, "Mount teardown failed for %s", packageName)
         }
+        
+        Timber.i("Uninstall completed for %s", packageName)
     }
 
     // ───────────────────────── Queries ────────────────────────────────────────

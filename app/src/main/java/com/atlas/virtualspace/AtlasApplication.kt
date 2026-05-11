@@ -111,6 +111,16 @@ class AtlasApplication : Application() {
             VirtualPackageManager.initialize(database)
             VirtualPackageManager.setContext(this)
 
+            // Start the virtual engine foreground service.
+            // This ensures the engine is initialized and ready before the user
+            // tries to launch any apps. The service keeps the engine alive
+            // even when the UI is in the background.
+            try {
+                com.atlas.virtualspace.core.engine.VirtualEngineService.start(this)
+            } catch (e: Exception) {
+                Timber.w(e, "Failed to start VirtualEngineService — engine will start on first launch")
+            }
+
             // Initialize Shizuku integration (non-fatal — app works without Shizuku).
             val shizukuResult = ShizukuIntegration.initialize(this)
             if (shizukuResult.isFailure) {
