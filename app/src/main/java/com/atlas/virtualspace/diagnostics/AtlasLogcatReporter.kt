@@ -238,11 +238,6 @@ object AtlasLogcatReporter {
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             val dumpFile = File(reportDir, "logcat_${timestamp}.txt")
 
-            // Clear previous logcat buffer first to get fresh data
-            try {
-                Runtime.getRuntime().exec("logcat -c").waitFor()
-            } catch (_: Exception) { /* ignore */ }
-
             val process = Runtime.getRuntime().exec(
                 arrayOf(
                     "logcat",

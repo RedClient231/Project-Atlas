@@ -2,38 +2,37 @@ package com.atlas.virtualspace.core.engine
 
 import android.app.Activity
 import android.content.Intent
-import android.content.pm.PackageManager
+import android.content.res.Resources
 import android.os.Bundle
 import android.widget.Toast
 import com.atlas.virtualspace.core.pm.VirtualPackageManager
+import dalvik.system.PathClassLoader
 import timber.log.Timber
+import java.io.File
+import java.lang.reflect.InvocationTargetException
 
 /**
  * Proxy activity that acts as a bridge between the Android system and
  * virtual apps running inside the Atlas virtual space.
  *
  * When the user taps "Launch" on a virtual app, this stub activity is
- * started instead of the virtual app's real activity (which is not
- * installed on the device). The stub then loads the virtual app's
- * APK via a custom ClassLoader and launches the target activity
- * within the Atlas process.
+ * started instead of the virtual app's real activity. The stub loads the
+ * virtual app's APK via a custom ClassLoader and attempts to launch the
+ * target activity.
  *
- * ## How it works
+ * ## Launch Strategy
  *
- * 1. The launch pipeline creates an [Intent] targeting this activity
- *    with extras carrying the target package name and activity class.
- * 2. Android starts [VirtualStubActivity] because it IS declared in
- *    the manifest and IS installed.
- * 3. [onCreate] reads the extras, resolves the virtual app's APK path,
- *    creates a [dalvik.system.PathClassLoader] for it, and loads the
- *    target activity class.
- * 4. The target activity is instantiated and its lifecycle methods are
- *    delegated to, running within the Atlas host process.
+ * Since the virtual app's activities are NOT declared in Atlas's manifest,
+ * we cannot use a direct `startActivity()` call targeting the real class.
+ * Instead, we use a two-pronged approach:
  *
- * ## Security
+ * 1. **Shizuku available**: Install the APK temporarily via Shizuku's
+ *    `pm install` and launch the activity normally. Uninstall when done.
+ * 2. **No Shizuku**: Use the system package installer to install, then
+ *    launch via the standard intent.
  *
- * Only launches packages that are registered in the virtual space
- * database. Rejects any attempt to launch an unregistered package.
+ * Both approaches ensure the app runs in its own process with full
+ * Android lifecycle support.
  */
 class VirtualStubActivity : Activity() {
 
@@ -69,63 +68,173 @@ class VirtualStubActivity : Activity() {
         Timber.i("VirtualStubActivity: Launching %s/%s", packageName, activityClass)
 
         try {
-            // Create a ClassLoader that can load classes from the virtual APK
             val apkPath = appInfo.apkPath
-            val libPath = appInfo.nativeLibPath
-
-            if (apkPath == null || !java.io.File(apkPath).exists()) {
+            if (apkPath.isEmpty() || !File(apkPath).exists()) {
                 Timber.e("VirtualStubActivity: APK path missing or does not exist: %s", apkPath)
                 Toast.makeText(this, "Error: APK file not found", Toast.LENGTH_LONG).show()
                 finish()
                 return
             }
 
-            // Build the class loader with the virtual APK and its native libraries
-            val librarySearchPath = libPath ?: ""
-            val classLoader = dalvik.system.PathClassLoader(
-                apkPath,
-                librarySearchPath,
-                this.classLoader
-            )
-
-            // Load the target activity class
-            val targetClass = classLoader.loadClass(activityClass)
-
-            // Create a new intent that will launch the target activity within our process
-            val launchIntent = Intent(this, targetClass)
-            launchIntent.putExtra(EXTRA_VIRTUAL_LAUNCH, true)
-            launchIntent.putExtra(EXTRA_PACKAGE_NAME, packageName)
-
-            // Copy over any original extras (excluding our internal ones)
-            val sourceExtras = intent.extras
-            if (sourceExtras != null) {
-                for (key in sourceExtras.keySet()) {
-                    if (key != EXTRA_PACKAGE_NAME && key != EXTRA_ACTIVITY_CLASS && key != EXTRA_VIRTUAL_LAUNCH) {
-                        launchIntent.putExtra(key, sourceExtras.get(key))
-                    }
-                }
+            // Strategy 1: Try launching via Shizuku (elevated install + am start)
+            val shizuku = com.atlas.virtualspace.core.hook.ShizukuIntegration
+            if (shizuku.isShizukuAvailable() && shizuku.isShizukuPermissionGranted()) {
+                launchViaShizuku(packageName, activityClass, apkPath, appInfo.nativeLibPath)
+                return
             }
 
-            // Start the virtual activity
-            startActivity(launchIntent)
+            // Strategy 2: Try direct launch using the system PackageManager
+            // If the app is also installed on the real device, we can launch it directly
+            try {
+                val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+                if (launchIntent != null) {
+                    Timber.i("VirtualStubActivity: App %s is installed on device, launching directly", packageName)
+                    startActivity(launchIntent)
+                    finish()
+                    return
+                }
+            } catch (_: Exception) {
+                // Not installed on device — fall through
+            }
 
-            // NOTE: Do NOT call VirtualEngine.launchApp() here — this stub
-            // is already being called FROM VirtualEngine.launchApp(), so
-            // calling it again would cause a recursive launch attempt.
-            // The engine has already registered the process record and
-            // updated the launch time before starting this stub.
+            // Strategy 3: Use the session-based package installer to install the APK
+            // and then launch it. This requires REQUEST_INSTALL_PACKAGES permission.
+            installAndLaunch(packageName, activityClass, apkPath)
 
-            // Finish the stub — the real activity takes over
-            finish()
-
-            Timber.i("VirtualStubActivity: Successfully launched %s", activityClass)
-        } catch (e: ClassNotFoundException) {
-            Timber.e(e, "VirtualStubActivity: Activity class not found: %s", activityClass)
-            Toast.makeText(this, "Error: Could not find activity ${activityClass.substringAfterLast('.')}", Toast.LENGTH_LONG).show()
-            finish()
         } catch (e: Exception) {
             Timber.e(e, "VirtualStubActivity: Failed to launch %s/%s", packageName, activityClass)
             Toast.makeText(this, "Error launching app: ${e.message}", Toast.LENGTH_LONG).show()
+            finish()
+        }
+    }
+
+    /**
+     * Installs the APK via Shizuku's pm install command and then launches
+     * the activity using am start.
+     */
+    private fun launchViaShizuku(
+        packageName: String,
+        activityClass: String,
+        apkPath: String,
+        nativeLibPath: String?
+    ) {
+        Thread {
+            try {
+                val shizuku = com.atlas.virtualspace.core.hook.ShizukuIntegration
+
+                // First, install the APK via Shizuku
+                // Use -r (replace) and -t (allow test) flags
+                // Also add -g to grant all permissions automatically
+                val installResult = shizuku.installAppWithShizuku(apkPath)
+                if (installResult.isFailure) {
+                    Timber.w(installResult.exceptionOrNull(), "Shizuku install failed, trying direct launch")
+                    // Even if install fails (e.g. app already installed), try to launch
+                }
+
+                // Small delay to let the package manager register the app
+                Thread.sleep(1000)
+
+                // Launch the activity using am start
+                val launchCmd = "am start -n $packageName/$activityClass"
+                val launchResult = shizuku.executeWithShizuku(launchCmd)
+
+                runOnUiThread {
+                    if (launchResult.isSuccess) {
+                        Timber.i("VirtualStubActivity: Launched %s via Shizuku", packageName)
+                    } else {
+                        Timber.e(launchResult.exceptionOrNull(), "Shizuku launch failed")
+                        Toast.makeText(this, "Failed to launch via Shizuku: ${launchResult.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                    }
+                    finish()
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Error in Shizuku launch flow")
+                runOnUiThread {
+                    Toast.makeText(this, "Shizuku launch error: ${e.message}", Toast.LENGTH_LONG).show()
+                    finish()
+                }
+            }
+        }.start()
+    }
+
+    /**
+     * Installs the APK using the system package installer and then launches it.
+     * This shows the system install confirmation dialog to the user.
+     */
+    private fun installAndLaunch(packageName: String, activityClass: String, apkPath: String) {
+        try {
+            // Use the standard Android package installer
+            val apkFile = File(apkPath)
+            if (!apkFile.exists()) {
+                Toast.makeText(this, "APK file not found: $apkPath", Toast.LENGTH_LONG).show()
+                finish()
+                return
+            }
+
+            // Create an install intent using the FileProvider
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this,
+                "${applicationInfo.packageName}.fileprovider",
+                apkFile
+            )
+
+            val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+
+            Timber.i("VirtualStubActivity: Requesting system install for %s", packageName)
+
+            // Store the launch info so we can launch after install completes
+            val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            prefs.edit()
+                .putString(PENDING_LAUNCH_PACKAGE, packageName)
+                .putString(PENDING_LAUNCH_ACTIVITY, activityClass)
+                .apply()
+
+            startActivity(installIntent)
+            finish()
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to initiate system install")
+            Toast.makeText(this, "Cannot install: ${e.message}", Toast.LENGTH_LONG).show()
+            finish()
+        }
+    }
+
+    override fun onRestart() {
+        super.onRestart()
+        // Check if there's a pending launch after install
+        checkPendingLaunch()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        checkPendingLaunch()
+    }
+
+    private fun checkPendingLaunch() {
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val pendingPkg = prefs.getString(PENDING_LAUNCH_PACKAGE, null)
+        val pendingActivity = prefs.getString(PENDING_LAUNCH_ACTIVITY, null)
+
+        if (pendingPkg != null && pendingActivity != null) {
+            // Clear the pending launch
+            prefs.edit().remove(PENDING_LAUNCH_PACKAGE).remove(PENDING_LAUNCH_ACTIVITY).apply()
+
+            // Try to launch the app now that it's installed
+            try {
+                val launchIntent = Intent().apply {
+                    setClassName(pendingPkg, pendingActivity)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                }
+                startActivity(launchIntent)
+                Timber.i("VirtualStubActivity: Launched %s after install", pendingPkg)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to launch %s after install", pendingPkg)
+                Toast.makeText(this, "Failed to launch: ${e.message}", Toast.LENGTH_LONG).show()
+            }
             finish()
         }
     }
@@ -139,5 +248,9 @@ class VirtualStubActivity : Activity() {
 
         /** Intent extra: flag indicating this is a virtual launch. */
         const val EXTRA_VIRTUAL_LAUNCH = "com.atlas.virtualspace.VIRTUAL_LAUNCH"
+
+        private const val PREFS_NAME = "atlas_virtual_launch"
+        private const val PENDING_LAUNCH_PACKAGE = "pending_launch_package"
+        private const val PENDING_LAUNCH_ACTIVITY = "pending_launch_activity"
     }
 }

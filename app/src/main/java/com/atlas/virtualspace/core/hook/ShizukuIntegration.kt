@@ -508,23 +508,48 @@ object ShizukuIntegration {
      */
     fun getShizukuStatus(): String {
         return try {
+            val binder = Shizuku.getBinder()
             when {
-                Shizuku.getBinder() != null && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED -> "running"
-                Shizuku.getBinder() != null -> "available"
+                binder != null -> {
+                    try {
+                        val permResult = Shizuku.checkSelfPermission()
+                        if (permResult == PackageManager.PERMISSION_GRANTED) {
+                            "running"
+                        } else {
+                            "available"
+                        }
+                    } catch (e: SecurityException) {
+                        // Permission hasn't been requested yet — Shizuku is running
+                        // but we need to request permission
+                        "available"
+                    } catch (e: Exception) {
+                        // Other error checking permission — Shizuku is likely running
+                        "available"
+                    }
+                }
                 else -> "not_installed"
             }
+        } catch (e: ClassNotFoundException) {
+            "not_installed"
+        } catch (e: NoClassDefFoundError) {
+            "not_installed"
+        } catch (e: IllegalStateException) {
+            // Shizuku is installed but not started
+            "available"
         } catch (e: Exception) {
-            when (e) {
-                is ClassNotFoundException, is NoClassDefFoundError -> "not_installed"
-                // IllegalStateException can occur if Shizuku is installed but not started
-                // SecurityException can occur if the app hasn't requested permission yet
-                // These all mean Shizuku is there but not ready
-                else -> {
-                    Log.d(TAG, "Shizuku status check threw: ${e.javaClass.simpleName}: ${e.message}")
-                    "available"
-                }
-            }
+            Log.d(TAG, "Shizuku status check threw unexpected: ${e.javaClass.simpleName}: ${e.message}")
+            // If we get here, Shizuku classes exist but something went wrong.
+            // This is NOT "unknown" — it likely means Shizuku is installed but not running.
+            "not_installed"
         }
+    }
+
+    /**
+     * Requests Shizuku permission from an Activity context.
+     * This is a convenience method that also updates internal state.
+     */
+    fun requestPermissionFromActivity(activity: Activity): Result<Unit> {
+        return requestPermission(activity)
     }
 
     /**

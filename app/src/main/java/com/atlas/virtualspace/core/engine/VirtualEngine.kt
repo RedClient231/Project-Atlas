@@ -114,10 +114,11 @@ object VirtualEngine {
             // 1. Initialise Pine hooking framework.
             initPine(context)
 
-            // 2. Create virtual file-system root.
-            VirtualFileSystem.initialize(context).getOrElse { error ->
-                Timber.e(error, "VirtualFileSystem initialisation failed")
-                throw error
+            // 2. Ensure virtual file-system root exists (idempotent).
+            val vfsResult = VirtualFileSystem.initialize(context)
+            if (vfsResult.isFailure) {
+                Timber.e(vfsResult.exceptionOrNull(), "VirtualFileSystem initialisation failed")
+                throw vfsResult.exceptionOrNull() ?: RuntimeException("VFS init failed")
             }
 
             // 3. Load persisted app registry.
@@ -219,6 +220,20 @@ object VirtualEngine {
                 return Result.failure(
                     IllegalStateException("App is disabled: $packageName")
                 )
+            }
+
+            // Ensure the engine is initialized
+            if (!_isRunning.value) {
+                Timber.w("VirtualEngine not running — attempting to initialize before launch")
+                val ctx = applicationContext
+                    ?: return Result.failure(IllegalStateException("Application context not available"))
+                val initResult = initialize(ctx)
+                if (initResult.isFailure) {
+                    return Result.failure(IllegalStateException(
+                        "VirtualEngine is not running and cannot be initialized",
+                        initResult.exceptionOrNull()
+                    ))
+                }
             }
 
             // If already running, just bring to foreground.

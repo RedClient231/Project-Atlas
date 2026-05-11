@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import javax.inject.Inject
 
 // ─── UI state models ──────────────────────────────────────────────────────────
@@ -281,6 +282,12 @@ class InstallViewModel @Inject constructor(
                     output.write(buffer, 0, read)
                 }
             }
+            output.flush()
+        }
+        
+        // Validate the temp file was written correctly
+        if (!tempFile.exists() || tempFile.length() == 0L) {
+            throw IOException("Failed to copy URI content — temp file is empty: ${tempFile.absolutePath}")
         }
 
         return tempFile

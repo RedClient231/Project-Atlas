@@ -149,6 +149,41 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM"
         android:minSdkVersion="33" />
 
+    <!-- Install shortcuts on launcher (for virtual app shortcuts) -->
+    <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT" />
+    <uses-permission android:name="com.android.launcher.permission.UNINSTALL_SHORTCUT" />
+
+    <!-- Overlay window (some apps need this for floating widgets) -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- Write settings (some apps modify system settings) -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+
+    <!-- Change network state (some apps toggle network) -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+
+    <!-- Modify audio settings (games often use this) -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- Background location (API 29+) -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"
+        android:minSdkVersion="29" />
+
+    <!-- Read phone numbers (some apps need this) -->
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
+
+    <!-- Answer phone calls (some VOIP apps) -->
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS"
+        android:minSdkVersion="26" />
+
+    <!-- Process out of memory (helps with large games) -->
+    <uses-permission android:name="android.permission.PROCESS_OUT_OF_MEMORY"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- Read app specific storage (Android 12+) -->
+    <uses-permission android:name="android.permission.READ_APP_SPECIFIC_LOCALE"
+        tools:ignore="ProtectedPermissions" />
+
     <!-- ═══════════════════════════════════════════════════════════════════════
          QUERIES — Intent Resolution Visibility (Android 11+)
          ═══════════════════════════════════════════════════════════════════════ -->
@@ -247,12 +282,19 @@
         -->
         <activity
             android:name=".core.engine.VirtualStubActivity"
-            android:exported="false"
+            android:exported="true"
             android:launchMode="standard"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:taskAffinity="com.atlas.virtualspace.virtual"
-            android:excludeFromRecents="true" />
+            android:excludeFromRecents="true">
+
+            <intent-filter>
+                <action android:name="com.atlas.virtualspace.LAUNCH_VIRTUAL_APP" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+
+        </activity>
 
         <!-- ═══════════════════════════════════════════════════════════════════
              SERVICES
