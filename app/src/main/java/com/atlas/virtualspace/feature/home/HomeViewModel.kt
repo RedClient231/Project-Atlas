@@ -78,7 +78,13 @@ class HomeViewModel @Inject constructor(
         _memoryInfo,
         _isRefreshing,
         _snackbarMessage,
-    ) { apps, query, running, memory, refreshing, snackbar ->
+    ) { args: Array<Any?> ->
+        val apps = args[0] as List<VirtualAppInfo>
+        val query = args[1] as String
+        val running = args[2] as Set<String>
+        val memory = args[3] as MemoryInfo
+        val refreshing = args[4] as Boolean
+        val snackbar = args[5] as String?
         val filtered = if (query.isBlank()) apps else apps.filter { app ->
             app.appName.contains(query, ignoreCase = true) ||
                     app.packageName.contains(query, ignoreCase = true)
