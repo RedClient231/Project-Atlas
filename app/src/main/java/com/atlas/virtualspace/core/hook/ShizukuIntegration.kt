@@ -102,8 +102,10 @@ object ShizukuIntegration {
             // Register permission result listener — this is CRITICAL for
             // requestPermission() to work. Without it, the CountDownLatch
             // always times out and status stays "unknown".
-            val listener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResults ->
-                onRequestPermissionResult(requestCode, grantResults)
+            val listener = object : Shizuku.OnRequestPermissionResultListener {
+                override fun onRequestPermissionResult(requestCode: Int, grantResults: IntArray) {
+                    this@ShizukuIntegration.onRequestPermissionResult(requestCode, grantResults)
+                }
             }
             permissionListener = listener
             Shizuku.addRequestPermissionResultListener(listener)
