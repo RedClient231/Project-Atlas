@@ -31,6 +31,7 @@ data class HomeUiState(
     val memoryInfo: MemoryInfo = MemoryInfo(totalMb = 0L, usedMb = 0L, availableMb = 0L),
     val searchQuery: String = "",
     val isRefreshing: Boolean = false,
+    val snackbarMessage: String? = null,
 )
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
@@ -49,6 +50,9 @@ class HomeViewModel @Inject constructor(
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
     private val _isRefreshing = MutableStateFlow(false)
+
+    /** Snackbar message for launch/uninstall feedback. */
+    private val _snackbarMessage = MutableStateFlow<String?>(null)
 
     /** All installed virtual apps, reactively updated via Room. */
     private val allApps = dao.getAll()
@@ -73,7 +77,8 @@ class HomeViewModel @Inject constructor(
         _runningPackages,
         _memoryInfo,
         _isRefreshing,
-    ) { apps, query, running, memory, refreshing ->
+        _snackbarMessage,
+    ) { apps, query, running, memory, refreshing, snackbar ->
         val filtered = if (query.isBlank()) apps else apps.filter { app ->
             app.appName.contains(query, ignoreCase = true) ||
                     app.packageName.contains(query, ignoreCase = true)
@@ -84,6 +89,7 @@ class HomeViewModel @Inject constructor(
             memoryInfo = memory,
             searchQuery = query,
             isRefreshing = refreshing,
+            snackbarMessage = snackbar,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -111,6 +117,7 @@ class HomeViewModel @Inject constructor(
             }
             if (result.isFailure) {
                 Timber.e(result.exceptionOrNull(), "Failed to launch %s", packageName)
+                _snackbarMessage.value = "Failed to launch: ${result.exceptionOrNull()?.message ?: "Unknown error"}"
             } else {
                 refreshRunningState()
             }
@@ -122,10 +129,17 @@ class HomeViewModel @Inject constructor(
             val result = withContext(Dispatchers.IO) {
                 VirtualEngine.uninstallApp(packageName)
             }
-            if (result.isFailure) {
+            if (result.isSuccess) {
+                _snackbarMessage.value = "App uninstalled successfully"
+            } else {
                 Timber.e(result.exceptionOrNull(), "Failed to uninstall %s", packageName)
+                _snackbarMessage.value = "Failed to uninstall: ${result.exceptionOrNull()?.message ?: "Unknown error"}"
             }
         }
+    }
+
+    fun clearSnackbarMessage() {
+        _snackbarMessage.value = null
     }
 
     fun clearData(packageName: String) {

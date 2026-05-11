@@ -119,7 +119,10 @@ class SettingsViewModel @Inject constructor(
 
     fun getStorageInfo(): StorageInfo {
         return try {
-            val virtualRoot = File(appContext.filesDir, "virtual_root")
+            // Use VirtualFileSystem.getVirtualRoot() which is the actual path
+            // where virtual data is stored, NOT appContext.filesDir which was
+            // the old (incorrect) path that didn't match VirtualFileSystem.
+            val virtualRoot = com.atlas.virtualspace.core.fs.VirtualFileSystem.getVirtualRoot()
             val totalSpace = virtualRoot.totalSpace
             val freeSpace = virtualRoot.freeSpace
             val usedSpace = totalSpace - freeSpace
@@ -185,14 +188,21 @@ class SettingsViewModel @Inject constructor(
         val nativeHooks = dataStore.data.map { it[SettingKeys.ENABLE_NATIVE_HOOKS] ?: true }
         val bit64 = dataStore.data.map { it[SettingKeys.ENABLE_64BIT_SUPPORT] ?: true }
 
-        // Shizuku status is queried LIVE from ShizukuIntegration, not from
-        // a stale DataStore value. This ensures the status is always accurate.
-        val shizukuStatusFlow = kotlinx.coroutines.flow.flowOf(ShizukuIntegration.getShizukuStatus())
+        // Shizuku status is queried LIVE from ShizukuIntegration.
+        // Previously used flowOf() which only emitted once at ViewModel creation,
+        // causing the status to remain "unknown" forever. Now we use a polling
+        // flow that checks every 3 seconds so the UI reflects the actual state
+        // after the user grants Shizuku permission.
+        val shizukuStatusFlow = kotlinx.coroutines.flow.flow {
+            while (true) {
+                emit(ShizukuIntegration.getShizukuStatus())
+                kotlinx.coroutines.delay(3000L)
+            }
+        }
 
         return kotlinx.coroutines.flow.combine(
             ggCompat, maxConcurrent, heapMult, nativeHooks, bit64, shizukuStatusFlow, _isClearingData, _isExporting
         ) { args: Array<Any?> ->
-            val storage = getStorageInfo()
             SettingsUiState(
                 gameGuardianCompat = args[0] as Boolean,
                 maxConcurrentApps = args[1] as Int,
@@ -200,7 +210,7 @@ class SettingsViewModel @Inject constructor(
                 enableNativeHooks = args[3] as Boolean,
                 enable64BitSupport = args[4] as Boolean,
                 shizukuStatus = args[5] as String,
-                storageInfo = storage,
+                storageInfo = getStorageInfo(),
                 isClearingData = args[6] as Boolean,
                 isExporting = args[7] as Boolean,
             )

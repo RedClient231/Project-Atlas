@@ -54,7 +54,14 @@ data class EngineConfig(
          * The virtual root is placed under the app's private data directory.
          */
         fun default(context: Context): EngineConfig {
-            val rootDir = File(context.filesDir, "virtual_root").absolutePath
+            // CRITICAL: Must use context.dataDir (NOT context.filesDir) to match
+            // VirtualFileSystem which uses context.dataDir for virtualRoot.
+            // context.dataDir = /data/data/{pkg}
+            // context.filesDir = /data/data/{pkg}/files
+            // Using filesDir previously caused the app registry to be stored at
+            // a different path than where VirtualFileSystem creates the actual
+            // directories, making the registry never found.
+            val rootDir = File(context.dataDir, "virtual_root").absolutePath
             return EngineConfig(
                 virtualRootPath = rootDir,
             ).apply {

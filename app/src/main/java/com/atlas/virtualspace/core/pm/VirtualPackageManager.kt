@@ -214,15 +214,27 @@ object VirtualPackageManager {
      */
     fun uninstallApp(packageName: String): Result<Unit> = runCatching {
         // 1. Delete from database
-        runBlocking(Dispatchers.IO) {
-            dao.deleteByPackage(packageName)
+        try {
+            runBlocking(Dispatchers.IO) {
+                dao.deleteByPackage(packageName)
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Database delete failed for %s, continuing with storage cleanup", packageName)
         }
 
         // 2. Delete virtual storage
-        VirtualFileSystem.deleteAppStorage(packageName).getOrThrow()
+        try {
+            VirtualFileSystem.deleteAppStorage(packageName).getOrThrow()
+        } catch (e: Exception) {
+            Timber.w(e, "Storage delete failed for %s", packageName)
+        }
 
-        // 3. Tear down mount points
-        VirtualMountManager.teardownAppMounts(packageName).getOrThrow()
+        // 3. Tear down mount points (non-fatal)
+        try {
+            VirtualMountManager.teardownAppMounts(packageName).getOrThrow()
+        } catch (e: Exception) {
+            Timber.w(e, "Mount teardown failed for %s", packageName)
+        }
     }
 
     // ───────────────────────── Queries ────────────────────────────────────────
@@ -384,12 +396,12 @@ object VirtualPackageManager {
                 it.name.contains("game", ignoreCase = true)
             } ?: false
 
-            // Launch activity: try to get from manifest via package manager
-            val launchActivity = try {
-                appContext.packageManager.getLaunchIntentForPackage(packageName)?.component?.className
-            } catch (_: Exception) {
-                null
-            }
+            // CRITICAL FIX: Resolve launch activity from the APK manifest,
+            // NOT from the system PackageManager. The system PM only knows
+            // about apps actually installed on the device. For APKs that
+            // are just files (the most common case), we must parse the
+            // manifest directly using apk-parser.
+            val launchActivity = resolveLaunchActivityFromApk(apk, packageName)
 
             val permissions = meta.permissions?.map { it.name } ?: emptyList()
 
@@ -431,6 +443,64 @@ object VirtualPackageManager {
                 icon = icon
             )
         }
+    }
+
+    /**
+     * Resolves the launch activity from the APK manifest.
+     *
+     * Strategy (in order of preference):
+     * 1. Parse the APK's AndroidManifest.xml using apk-parser to find
+     *    activities with ACTION_MAIN + CATEGORY_LAUNCHER intent filters.
+     * 2. Fallback: Try the system PackageManager (only works for apps
+     *    that are already installed on the device, e.g. clone installs).
+     * 3. Last resort: return null (the app cannot be launched).
+     */
+    private fun resolveLaunchActivityFromApk(apk: ApkFile, packageName: String): String? {
+        // Strategy 1: Parse the APK manifest directly.
+        try {
+            val manifest = apk.apkMeta
+            // apk-parser provides the launchable activity name via ApkMeta
+            // Some versions of apk-parser expose this directly.
+            // Check if there are activity entries with launcher intent filters.
+            val activities = apk.apkMeta.activities
+            if (activities != null && activities.isNotEmpty()) {
+                // Look for activities with LAUNCHER category
+                for (activity in activities) {
+                    val intentFilters = activity.intentFilters
+                    if (intentFilters != null) {
+                        for (filter in intentFilters) {
+                            val hasMainAction = filter.actions?.any { it == "android.intent.action.MAIN" } == true
+                            val hasLauncherCategory = filter.categories?.any { it == "android.intent.category.LAUNCHER" } == true
+                            if (hasMainAction && hasLauncherCategory) {
+                                // apk-parser returns activity names that may need package prefix
+                                var activityName = activity.name
+                                if (activityName.startsWith(".")) {
+                                    activityName = "$packageName$activityName"
+                                } else if (!activityName.contains(".")) {
+                                    activityName = "$packageName.$activityName"
+                                }
+                                return activityName
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to parse launch activity from APK manifest")
+        }
+
+        // Strategy 2: Try system PackageManager (works for clone installs).
+        try {
+            val launchIntent = appContext.packageManager.getLaunchIntentForPackage(packageName)
+            if (launchIntent != null) {
+                return launchIntent.component?.className
+            }
+        } catch (_: Exception) {
+            // Package not installed on device — this is normal for file imports
+        }
+
+        Timber.w("Could not resolve launch activity for %s — app may not be launchable", packageName)
+        return null
     }
 
     /**

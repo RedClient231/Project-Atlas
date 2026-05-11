@@ -230,9 +230,12 @@ class InstallViewModel @Inject constructor(
     // ── XAPK detection ────────────────────────────────────────────────────
 
     fun detectXapk(file: File): Boolean {
+        // Check file extension first
         if (file.name.endsWith(".xapk", ignoreCase = true)) return true
         // Check for manifest.json inside the ZIP (XAPK signature)
-        // Use ZipFile instead of ZipInputStream for more reliable reading
+        // Use ZipFile instead of ZipInputStream for more reliable reading.
+        // This is the most reliable detection method since ALL XAPK files
+        // contain a manifest.json at the root level.
         return try {
             java.util.zip.ZipFile(file).use { zip ->
                 zip.getEntry("manifest.json") != null
@@ -263,6 +266,10 @@ class InstallViewModel @Inject constructor(
         val inputStream = appContext.contentResolver.openInputStream(uri)
             ?: throw IllegalStateException("Cannot open URI: $uri")
 
+        // Determine file name, preserving the original extension for XAPK detection.
+        // The detectXapk() function checks if the file name ends with ".xapk",
+        // so we MUST preserve that extension. If the content resolver doesn't
+        // give us a name, we default to .apk but then try ZIP-based detection.
         val fileName = getFileName(uri) ?: "install_${System.currentTimeMillis()}.apk"
         val tempFile = File(appContext.cacheDir, fileName)
 

@@ -99,6 +99,23 @@ class MainActivity : ComponentActivity() {
                 add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
             }
         }.toTypedArray()
+
+        /**
+         * On Android 11+ (API 30+), MANAGE_EXTERNAL_STORAGE must be requested
+         * via a special settings intent, not through the standard permission system.
+         * This permission is needed to access APK/XAPK files on shared storage.
+         */
+        fun needsManageStoragePermission(context: android.content.Context): Boolean {
+            return Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                    !android.os.Environment.isExternalStorageManager()
+        }
+
+        fun getManageStorageIntent(): Intent {
+            return Intent(
+                android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                android.net.Uri.parse("package:com.atlas.virtualspace")
+            )
+        }
     }
 }
 
@@ -134,6 +151,14 @@ private fun AtlasApp(
     LaunchedEffect(Unit) {
         if (!allPermissionsGranted) {
             permissionLauncher.launch(MainActivity.REQUIRED_PERMISSIONS)
+        }
+        // On Android 11+, request MANAGE_EXTERNAL_STORAGE via settings
+        if (MainActivity.needsManageStoragePermission(context)) {
+            try {
+                context.startActivity(MainActivity.getManageStorageIntent())
+            } catch (e: Exception) {
+                Timber.w(e, "Cannot open MANAGE_EXTERNAL_STORAGE settings")
+            }
         }
     }
 

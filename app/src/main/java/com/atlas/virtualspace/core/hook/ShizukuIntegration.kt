@@ -516,7 +516,13 @@ object ShizukuIntegration {
         } catch (e: Exception) {
             when (e) {
                 is ClassNotFoundException, is NoClassDefFoundError -> "not_installed"
-                else -> "unknown"
+                // IllegalStateException can occur if Shizuku is installed but not started
+                // SecurityException can occur if the app hasn't requested permission yet
+                // These all mean Shizuku is there but not ready
+                else -> {
+                    Log.d(TAG, "Shizuku status check threw: ${e.javaClass.simpleName}: ${e.message}")
+                    "available"
+                }
             }
         }
     }

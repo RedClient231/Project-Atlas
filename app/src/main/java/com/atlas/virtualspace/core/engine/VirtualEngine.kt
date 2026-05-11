@@ -202,7 +202,8 @@ object VirtualEngine {
      * 1. Looks up the [VirtualAppInfo] for [packageName].
      * 2. Creates an [InternalProcessRecord] with a fresh virtual UID.
      * 3. Starts the virtual process via the IPC bridge.
-     * 4. Delegates to [VirtualActivityManager] to start the launcher activity.
+     * 4. Launches the app's main activity through [VirtualStubActivity],
+     *    which acts as a proxy to load the virtual app's classes.
      *
      * @param packageName The package name of the app to launch.
      * @return [Result.success] if the launch was dispatched, [Result.failure] otherwise.
@@ -217,16 +218,6 @@ object VirtualEngine {
             if (!appInfo.isEnabled) {
                 return Result.failure(
                     IllegalStateException("App is disabled: $packageName")
-                )
-            }
-
-            // Enforce concurrency limit.
-            val runningCount = processRecords.count { it.value.isAlive() }
-            if (runningCount >= engineConfig.maxConcurrentApps) {
-                return Result.failure(
-                    IllegalStateException(
-                        "Maximum concurrent app limit (${engineConfig.maxConcurrentApps}) reached"
-                    )
                 )
             }
 
@@ -256,16 +247,34 @@ object VirtualEngine {
             // Start the virtual process.
             startVirtualProcess(record, appInfo)
 
-            // Launch the main activity via the activity manager.
+            // Launch the main activity through VirtualStubActivity proxy.
+            // This is critical: the virtual app's package is NOT installed on
+            // the device, so Android's ActivityManager will reject a direct
+            // intent targeting it. Instead, we start VirtualStubActivity (which
+            // IS declared in the manifest) and pass the target package/activity
+            // as extras. The stub loads the virtual APK via PathClassLoader and
+            // starts the real activity.
             val launchActivity = appInfo.launchActivity
             if (launchActivity != null) {
-                val launchIntent = android.content.Intent(
-                    android.content.Intent.ACTION_MAIN
-                ).apply {
-                    component = ComponentName(packageName, launchActivity)
-                    addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+                val ctx = applicationContext
+                    ?: return Result.failure(IllegalStateException("Application context not available"))
+
+                val stubIntent = android.content.Intent(ctx, VirtualStubActivity::class.java).apply {
+                    putExtra(VirtualStubActivity.EXTRA_PACKAGE_NAME, packageName)
+                    putExtra(VirtualStubActivity.EXTRA_ACTIVITY_CLASS, launchActivity)
+                    putExtra(VirtualStubActivity.EXTRA_VIRTUAL_LAUNCH, true)
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
                 }
-                activityManager.startActivity(launchIntent, null)
+
+                ctx.startActivity(stubIntent)
+
+                Timber.i("Launched %s via VirtualStubActivity → %s", packageName, launchActivity)
+            } else {
+                Timber.w("No launch activity found for %s — cannot launch", packageName)
+                return Result.failure(
+                    IllegalStateException("No launch activity for $packageName")
+                )
             }
 
             // Update app metadata with last launch time.

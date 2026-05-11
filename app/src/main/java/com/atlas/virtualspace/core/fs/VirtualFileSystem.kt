@@ -24,7 +24,19 @@ import java.nio.file.attribute.PosixFilePermission
  */
 object VirtualFileSystem {
 
-    private lateinit var virtualRoot: File
+    @Volatile
+    private var virtualRoot: File? = null
+
+    /**
+     * Returns the virtual root directory.
+     * Throws [IllegalStateException] if accessed before [initialize] is called.
+     */
+    fun getVirtualRoot(): File {
+        return virtualRoot
+            ?: throw IllegalStateException(
+                "VirtualFileSystem not initialized. Call VirtualFileSystem.initialize(context) first."
+            )
+    }
 
     private val STANDARD_SUBDIRS = listOf(
         "apps",
@@ -57,31 +69,29 @@ object VirtualFileSystem {
      *         or [Result.failure] wrapping the first IOException encountered.
      */
     fun initialize(context: Context): Result<Unit> = runCatching {
-        virtualRoot = File(context.dataDir, "virtual_root")
+        val root = File(context.dataDir, "virtual_root")
+        virtualRoot = root
 
-        if (!virtualRoot.exists() && !virtualRoot.mkdirs()) {
-            throw IOException("Failed to create virtual root: ${virtualRoot.absolutePath}")
+        if (!root.exists() && !root.mkdirs()) {
+            throw IOException("Failed to create virtual root: ${root.absolutePath}")
         }
 
         for (subdir in STANDARD_SUBDIRS) {
-            val dir = File(virtualRoot, subdir)
+            val dir = File(root, subdir)
             if (!dir.exists() && !dir.mkdirs()) {
                 throw IOException("Failed to create subdir: ${dir.absolutePath}")
             }
         }
 
         // Set restrictive permissions on the virtual root (rwx------)
-        setSecurePermissions(virtualRoot)
+        setSecurePermissions(root)
     }
 
     // ───────────────────────────── Path helpers ──────────────────────────────
 
-    /** Root directory of the entire virtual filesystem. */
-    fun getVirtualRoot(): File = virtualRoot
-
     /** /virtual_root/apps/{packageName}/ */
     fun getAppDataDir(packageName: String): File =
-        File(File(virtualRoot, "apps"), packageName)
+        File(File(getVirtualRoot(), "apps"), packageName)
 
     /** /virtual_root/apps/{packageName}/shared_prefs/ */
     fun getAppSharedPrefsDir(packageName: String): File =
@@ -101,11 +111,11 @@ object VirtualFileSystem {
 
     /** /virtual_root/obb/{packageName}/ */
     fun getAppObbDir(packageName: String): File =
-        File(File(virtualRoot, "obb"), packageName)
+        File(File(getVirtualRoot(), "obb"), packageName)
 
     /** /virtual_root/lib/{packageName}/ */
     fun getAppLibDir(packageName: String): File =
-        File(File(virtualRoot, "lib"), packageName)
+        File(File(getVirtualRoot(), "lib"), packageName)
 
     // ───────────────────── App storage lifecycle ──────────────────────────────
 
@@ -289,9 +299,10 @@ object VirtualFileSystem {
      * behind by a crashed or interrupted uninstall.
      */
     fun cleanupOrphanedStorage(installedPackages: Set<String>): Result<Unit> = runCatching {
-        val appsDir = File(virtualRoot, "apps")
-        val obbDir = File(virtualRoot, "obb")
-        val libDir = File(virtualRoot, "lib")
+        val root = getVirtualRoot()
+        val appsDir = File(root, "apps")
+        val obbDir = File(root, "obb")
+        val libDir = File(root, "lib")
 
         // Clean app data dirs
         val appDirs = appsDir.listFiles()?.asList() ?: emptyList()
