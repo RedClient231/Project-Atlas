@@ -36,3 +36,33 @@ Stage Summary:
 - Commit: bf42856 - "fix: correct Shizuku permission listener signature"
 - CI Build: 25674707719 - SUCCESS (6m53s)
 - All 4 bugs fixed, logcat reporter implemented, OBB handling improved
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: Fix "Launch does nothing" and "no app icon" issues when tapping Launch on virtual apps
+
+Work Log:
+- Analyzed the complete launch flow: HomeScreen → HomeViewModel → VirtualPackageManager → VirtualEngine → VirtualActivityManager → IPCBridge
+- Identified 6 critical bugs causing the launch failure:
+  1. launchActivity is always null because PackageManager.getLaunchIntentForPackage() only works for apps actually installed on the device
+  2. No proxy Activity in AndroidManifest.xml - Android can't start activities from uninstalled packages
+  3. startVirtualProcess() is a stub using host PID, no real process is created
+  4. IPCBridge has no connection because no real virtual process exists
+  5. activityManager.startActivity() result is ignored in VirtualEngine.launchApp()
+  6. Shortcut creation targets non-existent component + missing icon
+- Created VirtualStubActivity proxy activity that receives package/activity as intent extras and loads virtual app code via DexClassLoader
+- Added VirtualStubActivity to AndroidManifest.xml with android:process=":virtual" for process isolation
+- Fixed VirtualPackageManager.parseApkInfo() to resolve launchActivity from APK's AndroidManifest.xml via apk-parser instead of system PM
+- Rewrote VirtualEngine.launchApp() to use VirtualStubActivity.createLaunchIntent() proxy pattern
+- Added launchViaProxyActivity() method to VirtualEngine
+- Fixed shortcut creation in HomeViewModel to target proxy activity and include app icon
+- Improved XAPK handling: added file size validation, Apache Commons Compress fallback for non-standard ZIP files
+- Updated ProGuard rules for VirtualStubActivity, VirtualAppContext, and AssetManager reflection
+- Pushed all changes to GitHub
+
+Stage Summary:
+- Root cause: Virtual apps are NOT registered with system PackageManager, so Android cannot start their activities directly
+- Fix: VirtualStubActivity proxy pattern - this activity IS in the manifest, receives the target package/activity as extras, loads the virtual APK via DexClassLoader, and runs the virtual app's Activity class via reflection
+- Launch activity now parsed from APK manifest instead of system PM
+- Commit: 81ddd1d pushed to origin/main
