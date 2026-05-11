@@ -2,9 +2,11 @@ package com.atlas.virtualspace.core.engine
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.os.Process
 import com.atlas.virtualspace.core.fs.VirtualFileSystem
 import com.atlas.virtualspace.core.hook.HookManager
+import com.atlas.virtualspace.core.hook.SystemServiceHooks
 import com.atlas.virtualspace.core.pm.InstallType
 import com.atlas.virtualspace.core.pm.VirtualAppInfo
 import com.atlas.virtualspace.core.pm.VirtualPackageManager
@@ -129,6 +131,16 @@ object VirtualEngine {
             // 4. Install activity hooks.
             activityManager.installHooks()
 
+            // 5. Install system service hooks (PackageManager, ActivityManager, etc.)
+            //     These intercept system service calls from virtual apps and redirect
+            //     them to Atlas' virtual implementations.
+            val sysHooksResult = SystemServiceHooks.hookAll()
+            if (sysHooksResult.isFailure) {
+                Timber.w(sysHooksResult.exceptionOrNull(), "Some system service hooks failed — virtual apps may see real system data")
+            } else {
+                Timber.i("All system service hooks installed successfully")
+            }
+
             _isRunning.value = true
 
             Timber.i(
@@ -236,10 +248,26 @@ object VirtualEngine {
                 }
             }
 
-            // If already running, just bring to foreground.
+            // If already running, try to bring to foreground via an intent.
             val existing = processRecords[packageName]
             if (existing != null && existing.isAlive()) {
                 Timber.i("App %s already running (pid %d) – bringing to foreground", packageName, existing.pid.get())
+                try {
+                    val ctx = applicationContext ?: return Result.failure(
+                        IllegalStateException("Application context not available")
+                    )
+                    val launchIntent = ctx.packageManager.getLaunchIntentForPackage(packageName)
+                    if (launchIntent != null) {
+                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                        ctx.startActivity(launchIntent)
+                        return Result.success(Unit)
+                    }
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to bring %s to foreground", packageName)
+                }
+                // If we can't bring it to foreground, still return success
+                // since it IS running.
                 return Result.success(Unit)
             }
 
@@ -510,6 +538,34 @@ object VirtualEngine {
         Timber.w("Process death notified for %s (pid=%d)", packageName, record.pid.get())
     }
 
+    /**
+     * Called by [VirtualStubActivity] when a virtual app has been successfully
+     * launched. Updates the process record from STARTING to RUNNING.
+     *
+     * Also attempts to determine the actual PID of the launched app process
+     * by querying the ActivityManager.
+     */
+    fun notifyActivityLaunched(packageName: String) {
+        val record = processRecords[packageName] ?: return
+        record.state.set(ProcessState.RUNNING)
+
+        // Try to find the actual PID of the running app process
+        try {
+            val ctx = applicationContext ?: return
+            val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            val processes = am?.runningAppProcesses
+            val appProcess = processes?.firstOrNull { it.processName == packageName }
+            if (appProcess != null) {
+                record.pid.set(appProcess.pid)
+                Timber.i("Activity launched: %s (pid=%d)", packageName, appProcess.pid)
+            } else {
+                Timber.i("Activity launched: %s (pid unknown — app runs in its own process)", packageName)
+            }
+        } catch (e: Exception) {
+            Timber.i("Activity launched: %s (pid lookup failed: %s)", packageName, e.message)
+        }
+    }
+
     // ─── Pine Initialisation ─────────────────────────────────────
 
     private fun initPine(context: Context) {
@@ -574,36 +630,34 @@ object VirtualEngine {
     // ─── Virtual Process Management ──────────────────────────────
 
     private fun startVirtualProcess(record: InternalProcessRecord, appInfo: VirtualAppInfo) {
-        // In a production implementation this would fork a new process via zygote
-        // and set up the socket pair before executing the app's main() method.
-        // For now we simulate the process start.
+        // Atlas uses a single-process model where the virtual app is installed
+        // on the real device and launched normally. The "virtual process" record
+        // tracks the app's virtual-space lifecycle, not an actual forked process.
+        //
+        // The app will run in its own process managed by Android's ActivityManager.
+        // We track it as STARTING until VirtualStubActivity confirms the launch.
 
-        val actualPid = Process.myPid() // placeholder – real impl would use child PID
-        record.pid.set(actualPid)
-        record.state.set(ProcessState.RUNNING)
+        record.pid.set(0) // Will be updated by notifyActivityLaunched if we can determine the PID
+        record.state.set(ProcessState.STARTING)
         record.startTime.set(System.currentTimeMillis())
 
-        Timber.d("Virtual process started: %s (pid=%d)", record.packageName, actualPid)
+        Timber.d("Virtual process record created: %s (state=STARTING, awaiting launch confirmation)", record.packageName)
     }
 
     private fun terminateVirtualProcess(record: InternalProcessRecord) {
         val pid = record.pid.get()
-        if (pid <= 0) return
 
         try {
-            // Send SIGQUIT first for an ANR trace, then SIGKILL.
-            Process.sendSignal(pid, Process.SIGNAL_QUIT)
-
-            // Wait briefly for graceful exit.
-            Thread.sleep(100L)
-
-            // Check if process is still alive; force-kill if necessary.
-            val procDir = File("/proc/$pid")
-            if (procDir.exists()) {
+            // Try to force-stop the app via Shizuku (most reliable)
+            val shizuku = com.atlas.virtualspace.core.hook.ShizukuIntegration
+            if (shizuku.isShizukuAvailable() && shizuku.isShizukuPermissionGranted()) {
+                shizuku.forceStopWithShizuku(record.packageName)
+            } else if (pid > 0 && pid != Process.myPid()) {
+                // Only try to kill if PID is valid and NOT our own process
                 Process.killProcess(pid)
             }
         } catch (e: Exception) {
-            Timber.w(e, "Error terminating virtual process %d", pid)
+            Timber.w(e, "Error terminating virtual process for %s", record.packageName)
         }
 
         record.state.set(ProcessState.STOPPED)

@@ -1,6 +1,8 @@
 package com.atlas.virtualspace.feature.logcat
 
 import android.content.Context
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.atlas.virtualspace.data.database.AppDatabase
@@ -127,10 +129,11 @@ class LogcatViewModel @Inject constructor(
             if (entries.isEmpty()) return null
 
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val exportFile = File(
-                appContext.getExternalFilesDir(null),
-                "atlas_logcat_$timestamp.txt",
-            )
+            // Save to public Downloads directory on internal storage
+            // so the user can easily find and share the log file.
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            if (!downloadsDir.exists()) downloadsDir.mkdirs()
+            val exportFile = File(downloadsDir, "atlas_logcat_$timestamp.txt")
 
             FileOutputStream(exportFile).bufferedWriter().use { writer ->
                 writer.write("=== Atlas Logcat Export ===\n")

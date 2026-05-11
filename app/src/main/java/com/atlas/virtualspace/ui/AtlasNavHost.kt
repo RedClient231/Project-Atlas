@@ -11,6 +11,10 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -89,6 +93,7 @@ fun AtlasNavHost(
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
+    val snackbarHostState = remember { SnackbarHostState() }
 
     // Determine which bottom-tab routes should show the navigation bar
     val showBottomBar = BOTTOM_NAV_ITEMS.any { item ->
@@ -97,6 +102,14 @@ fun AtlasNavHost(
 
     Scaffold(
         modifier = modifier,
+        snackbarHost = {
+            SnackbarHost(hostState = snackbarHostState) { data ->
+                Snackbar(
+                    snackbarData = data,
+                    duration = SnackbarDuration.Short,
+                )
+            }
+        },
         bottomBar = {
             if (showBottomBar) {
                 NavigationBar {
@@ -176,6 +189,7 @@ fun AtlasNavHost(
                     onNavigateToAppDetail = { packageName ->
                         navController.navigate(AtlasRoutes.appDetail(packageName))
                     },
+                    snackbarHostState = snackbarHostState,
                 )
             }
 

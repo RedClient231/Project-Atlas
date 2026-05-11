@@ -1,6 +1,7 @@
 package com.atlas.virtualspace.diagnostics
 
 import android.content.Context
+import android.os.Environment
 import android.os.Process
 import timber.log.Timber
 import java.io.BufferedReader
@@ -22,12 +23,12 @@ import java.util.concurrent.TimeUnit
  * Persistent diagnostic log reporter for Project Atlas.
  *
  * Writes error reports and logcat output to **internal phone storage**
- * (NOT SD card). Reports are stored under the app's private data directory
- * so they survive app reinstallation and are accessible via:
+ * (NOT SD card). Reports are stored in the public Downloads directory
+ * so the user can easily find them using any file manager:
  *
- * - `adb shell` → `/data/data/com.atlas.virtualspace/app_atlas_reports/`
- * - Android Studio Device File Explorer
- * - Root file managers
+ * - Downloads/AtlasReports/ — error reports, logcat dumps, crash reports
+ * - Accessible via any file manager or the Files app
+ * - Survives app uninstallation (unlike app-private storage)
  *
  * ## Report Types
  *
@@ -38,12 +39,11 @@ import java.util.concurrent.TimeUnit
  *
  * ## Storage Location
  *
- * All reports go to: `{context.dataDir}/app_atlas_reports/`
- * Which resolves to: `/data/data/com.atlas.virtualspace/app_atlas_reports/`
+ * All reports go to: `Downloads/AtlasReports/`
+ * Which resolves to: `/storage/emulated/0/Download/AtlasReports/`
  *
- * This is **internal storage**, not SD card. The `getDir()` API creates
- * a directory that is part of the app's permanent private storage on
- * the device's internal flash memory.
+ * This is **public internal storage**, accessible by any file manager.
+ * The user can find reports in the Downloads folder of their Files app.
  *
  * ## Thread Safety
  *
@@ -94,10 +94,10 @@ object AtlasLogcatReporter {
     fun initialize(context: Context) {
         if (initialized) return
 
-        // Use getDir() which creates a directory in the app's internal
-        // storage: /data/data/{pkg}/app_atlas_reports/
-        // This is NOT SD card — it's the phone's internal flash storage.
-        reportDir = File(context.getDir("atlas_reports", Context.MODE_PRIVATE), "reports")
+        // Use the public Downloads directory so the user can easily find
+        // reports using any file manager or the Files app.
+        // Path: /storage/emulated/0/Download/AtlasReports/
+        reportDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "AtlasReports")
         val dir = reportDir!!
         if (!dir.exists() && !dir.mkdirs()) {
             Timber.e("Failed to create report directory: %s", dir.absolutePath)

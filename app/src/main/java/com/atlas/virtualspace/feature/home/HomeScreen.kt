@@ -28,9 +28,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SearchBar
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,10 +64,19 @@ fun HomeScreen(
     onNavigateToInstall: () -> Unit,
     onNavigateToAppDetail: (String) -> Unit,
     highlightPackage: String? = null,
+    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var isSearchBarExpanded by remember { mutableStateOf(false) }
+
+    // Show snackbar when error message changes
+    LaunchedEffect(uiState.snackbarMessage) {
+        uiState.snackbarMessage?.let { message ->
+            snackbarHostState.showSnackbar(message)
+            viewModel.clearSnackbarMessage()
+        }
+    }
 
     PullToRefreshBox(
         isRefreshing = uiState.isRefreshing,

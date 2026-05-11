@@ -33,4 +33,14 @@
         name="apk_dir"
         path="virtual_root/apps/" />
 
+    <!-- Public Downloads directory for logcat exports and crash reports -->
+    <external-path
+        name="downloads"
+        path="Download/" />
+
+    <!-- AtlasReports subdirectory in Downloads -->
+    <external-path
+        name="atlas_reports"
+        path="Download/AtlasReports/" />
+
 </paths>

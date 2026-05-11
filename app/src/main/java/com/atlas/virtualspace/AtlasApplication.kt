@@ -1,7 +1,11 @@
 package com.atlas.virtualspace
 
 import android.app.Application
+import android.content.Intent
+import android.net.Uri
+import android.os.Environment
 import android.os.Process
+import android.provider.Settings
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -127,10 +131,44 @@ class AtlasApplication : Application() {
                 Timber.w(shizukuResult.exceptionOrNull(), "Shizuku integration not available")
             }
 
+            // Request MANAGE_EXTERNAL_STORAGE permission for writing to Downloads.
+            // This is required on Android 11+ (API 30+) to write to public directories.
+            requestStoragePermission()
+
             Timber.i("Core components initialized: VFS=%s, Shizuku=%s",
                 vfsResult.isSuccess, shizukuResult.isSuccess)
         } catch (e: Exception) {
             Timber.e(e, "Critical error during core component initialization")
+        }
+    }
+
+    /**
+     * Requests MANAGE_EXTERNAL_STORAGE permission on Android 11+.
+     * This is required for writing logcat files and crash reports
+     * to the public Downloads directory.
+     *
+     * Without this permission, the app falls back to app-specific
+     * directories which are hidden from the user.
+     */
+    private fun requestStoragePermission() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                Timber.w("MANAGE_EXTERNAL_STORAGE not granted — log files may not be visible in Downloads")
+                // We don't auto-launch the settings screen here because it's
+                // disruptive. The Settings screen in the app should have a button
+                // to grant this permission. But we try to request it anyway.
+                try {
+                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                        data = Uri.parse("package:$packageName")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    Timber.w(e, "Cannot launch storage permission settings")
+                }
+            } else {
+                Timber.i("MANAGE_EXTERNAL_STORAGE permission granted")
+            }
         }
     }
 
@@ -144,9 +182,9 @@ class AtlasApplication : Application() {
     // ─── Crash Handler ───────────────────────────────────────────
 
     private val crashLogDir by lazy {
-        // Use internal storage: /data/data/{pkg}/app_atlas_reports/
-        // This is accessible via Settings > Storage and is NOT on SD card.
-        File(getDir("atlas_reports", MODE_PRIVATE), "crash_logs").also { dir ->
+        // Use public Downloads directory so crash logs are visible to the user.
+        // Path: /storage/emulated/0/Download/AtlasReports/crash_logs/
+        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "AtlasReports/crash_logs").also { dir ->
             if (!dir.exists()) dir.mkdirs()
         }
     }
