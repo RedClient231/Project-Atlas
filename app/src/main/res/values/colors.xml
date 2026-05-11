@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ~ Project Atlas - Android Virtual Space
+  ~
+  ~ Color Resources
+  ~ Standard Material Design colors for legacy views and XML-based
+  ~ components. Compose theme uses these as color tokens.
+  -->
+<resources>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Primary Palette — Deep Indigo
+         ═══════════════════════════════════════════════════════════════ -->
+    <color name="primary">#FF1A237E</color>
+    <color name="primary_variant">#FF0D1642</color>
+    <color name="on_primary">#FFFFFFFF</color>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Secondary Palette — Teal Accent
+         ═══════════════════════════════════════════════════════════════ -->
+    <color name="secondary">#FF00BFA5</color>
+    <color name="secondary_variant">#FF008E76</color>
+    <color name="on_secondary">#FF000000</color>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Tertiary Palette — Amber Highlight
+         ═══════════════════════════════════════════════════════════════ -->
+    <color name="tertiary">#FFFFB300</color>
+    <color name="tertiary_variant">#FFE68A00</color>
+    <color name="on_tertiary">#FF000000</color>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Error Palette
+         ═══════════════════════════════════════════════════════════════ -->
+    <color name="error">#FFB3261E</color>
+    <color name="error_variant">#FF8C1D18</color>
+    <color name="on_error">#FFFFFFFF</color>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Background & Surface
+         ═══════════════════════════════════════════════════════════════ -->
+    <color name="background">#FFFBFDFE</color>
+    <color name="on_background">#FF1A1C1E</color>
+    <color name="surface">#FFFBFDFE</color>
+    <color name="on_surface">#FF1A1C1E</color>
+    <color name="surface_variant">#FFE0E2EC</color>
+    <color name="on_surface_variant">#FF43474E</color>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Outline & Inverse
+         ═══════════════════════════════════════════════════════════════ -->
+    <color name="outline">#FF73777F</color>
+    <color name="outline_variant">#FFC3C7CF</color>
+    <color name="inverse_surface">#FF2F3033</color>
+    <color name="inverse_on_surface">#FFF0F0F7</color>
+    <color name="inverse_primary">#FFB0BCFF</color>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Standard Material Colors (Legacy)
+         ═══════════════════════════════════════════════════════════════ -->
+    <color name="material_red_500">#FFF44336</color>
+    <color name="material_red_700">#FFD32F2F</color>
+    <color name="material_green_500">#FF4CAF50</color>
+    <color name="material_green_700">#FF388E3C</color>
+    <color name="material_blue_500">#FF2196F3</color>
+    <color name="material_blue_700">#FF1976D2</color>
+    <color name="material_yellow_500">#FFFFEB3B</color>
+    <color name="material_orange_500">#FFFF9800</color>
+    <color name="material_purple_500">#FF9C27B0</color>
+    <color name="material_teal_500">#FF009688</color>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Semantic / Functional Colors
+         ═══════════════════════════════════════════════════════════════ -->
+    <color name="status_running">#FF4CAF50</color>
+    <color name="status_stopped">#FF9E9E9E</color>
+    <color name="status_error">#FFF44336</color>
+    <color name="status_warning">#FFFF9800</color>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Utility Colors
+         ═══════════════════════════════════════════════════════════════ -->
+    <color name="transparent">#00000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="black">#FF000000</color>
+    <color name="scrim">#52000000</color>
+
+    <!-- Night-specific overrides (referenced by themes.xml) -->
+    <color name="primary_night">#FFB0BCFF</color>
+    <color name="primary_variant_night">#FF434F8E</color>
+    <color name="on_primary_night">#FF00208A</color>
+    <color name="secondary_night">#FF5EDDC9</color>
+    <color name="on_secondary_night">#FF003731</color>
+    <color name="background_night">#FF1A1C1E</color>
+    <color name="on_background_night">#FFE2E2E9</color>
+    <color name="surface_night">#FF1A1C1E</color>
+    <color name="on_surface_night">#FFE2E2E9</color>
+    <color name="surface_variant_night">#FF43474E</color>
+    <color name="on_surface_variant_night">#FFC3C7CF</color>
+    <color name="outline_night">#FF8D9199</color>
+
+</resources>

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ~ Project Atlas - Android Virtual Space
+  ~
+  ~ Data Extraction Rules (Android 12+)
+  ~ Controls what data is included in device-to-device transfers
+  ~ and cloud backups. Virtual root is excluded due to size;
+  ~ cache and logs are always excluded.
+  -->
+<data-extraction-rules>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Cloud Backup Rules
+         ═══════════════════════════════════════════════════════════════ -->
+    <cloud-backup>
+        <!-- Include: app preferences and settings -->
+        <include domain="sharedpref" path="." />
+
+        <!-- Include: Room database files -->
+        <include domain="database" path="." />
+
+        <!-- Include: general app files (configs, registry) -->
+        <include domain="file" path="." />
+
+        <!-- Exclude: virtual root directory (too large, contains APKs + data) -->
+        <exclude domain="file" path="virtual_root" />
+
+        <!-- Exclude: cache directory -->
+        <exclude domain="file" path="cache" />
+
+        <!-- Exclude: log files -->
+        <exclude domain="file" path="logs" />
+    </cloud-backup>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Device Transfer Rules (Android 12+ device-to-device migration)
+         ═══════════════════════════════════════════════════════════════ -->
+    <device-transfer>
+        <!-- Include: app preferences and settings -->
+        <include domain="sharedpref" path="." />
+
+        <!-- Include: Room database files -->
+        <include domain="database" path="." />
+
+        <!-- Include: general app files -->
+        <include domain="file" path="." />
+
+        <!-- Exclude: virtual root directory (too large for D2D transfer) -->
+        <exclude domain="file" path="virtual_root" />
+
+        <!-- Exclude: cache directory -->
+        <exclude domain="file" path="cache" />
+
+        <!-- Exclude: log files -->
+        <exclude domain="file" path="logs" />
+    </device-transfer>
+
+</data-extraction-rules>

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ~ Project Atlas - Android Virtual Space
+  ~
+  ~ FileProvider Paths Configuration
+  ~ Defines the paths that can be shared via FileProvider for APK
+  * sharing, installation, and data exchange with external apps.
+  -->
+<paths>
+
+    <!-- External storage files directory -->
+    <external-files-path
+        name="external_files"
+        path="." />
+
+    <!-- External storage cache directory -->
+    <external-cache-path
+        name="external_cache"
+        path="." />
+
+    <!-- Internal app files directory (Context.getFilesDir()) -->
+    <files-path
+        name="internal_files"
+        path="." />
+
+    <!-- Internal app cache directory (Context.getCacheDir()) -->
+    <cache-path
+        name="internal_cache"
+        path="." />
+
+    <!-- Virtual root APK directory — contains installed virtual APKs -->
+    <files-path
+        name="apk_dir"
+        path="virtual_root/apps/" />
+
+</paths>

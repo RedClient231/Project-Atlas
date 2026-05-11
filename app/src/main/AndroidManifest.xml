@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ~ Project Atlas - Android Virtual Space
+  ~ Copyright (c) 2024 Atlas Contributors
+  ~
+  ~ AndroidManifest.xml
+  ~ Declares all application components, permissions, and configuration
+  ~ required for the virtual space engine to operate correctly.
+  -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         PERMISSIONS
+         ═══════════════════════════════════════════════════════════════════════ -->
+
+    <!-- Network access for Shizuku communication and update checks -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Foreground services for the virtual engine and logcat monitoring -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- Prevent battery optimization from killing the virtual engine -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- Legacy storage permissions for APK import on older API levels -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+    <!-- Notifications for foreground service notification (Android 13+) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Query all installed packages for app listing and virtual installation -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
+    <!-- Full file access for APK management on Android 11+ -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        android:minSdkVersion="30" />
+
+    <!-- Wake lock to keep the virtual engine alive during active sessions -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Auto-start the engine service on device boot -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         QUERIES — Intent Resolution Visibility (Android 11+)
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <queries>
+
+        <!-- Packages: ability to resolve installed apps -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+        </intent>
+
+        <!-- Activities: resolve launchable activities for cloned apps -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <data android:mimeType="application/vnd.android.package-archive" />
+        </intent>
+
+        <!-- Services: discover Shizuku service -->
+        <intent>
+            <action android:name="dev.rikka.shizuku.intent.action.BIND_SERVICE" />
+        </intent>
+
+        <!-- Content providers: resolve file providers for APK sharing -->
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="application/vnd.android.package-archive" />
+        </intent>
+
+    </queries>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         APPLICATION
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <application
+        android:name=".AtlasApplication"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Atlas"
+        android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:requestLegacyExternalStorage="false"
+        tools:targetApi="35">
+
+        <!-- ─── Native Hook Shared Library ─────────────────────────────────── -->
+        <!--
+            Install-time shared library containing native JNI hooks
+            used by the Pine hooking framework for method interception.
+        -->
+        <uses-native-library
+            android:name="libatlas_hooks.so"
+            android:required="false" />
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             ACTIVITIES
+             ═══════════════════════════════════════════════════════════════════ -->
+
+        <!-- Main launcher activity -->
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Default screen orientation for the launcher -->
+            <meta-data
+                android:name="android.app.default_orientation"
+                android:value="unspecified" />
+
+        </activity>
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             SERVICES
+             ═══════════════════════════════════════════════════════════════════ -->
+
+        <!--
+            VirtualEngine Service
+            Foreground service that hosts the virtual environment runtime.
+            Manages cloned app processes, hook dispatch, and IPC coordination.
+        -->
+        <service
+            android:name=".core.engine.VirtualEngineService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false"
+            android:enabled="true">
+
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Virtual environment runtime: manages cloned app processes, method hook dispatch via Pine framework, and inter-process communication coordination for virtualized applications" />
+
+        </service>
+
+        <!--
+            Logcat Service
+            Foreground service for real-time log capture and monitoring
+            of virtualized application processes.
+        -->
+        <service
+            android:name=".feature.logcat.LogcatService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="true"
+            android:enabled="true">
+
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Real-time log capture and monitoring of virtualized application processes for debugging and diagnostics" />
+
+        </service>
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             BROADCAST RECEIVERS
+             ═══════════════════════════════════════════════════════════════════ -->
+
+        <!--
+            Boot Completed Receiver
+            Restores the virtual engine state after device reboot
+            if the user has enabled auto-start.
+        -->
+        <receiver
+            android:name=".receiver.BootCompletedReceiver"
+            android:exported="true"
+            android:directBootAware="false"
+            android:enabled="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+
+        </receiver>
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             CONTENT PROVIDERS
+             ═══════════════════════════════════════════════════════════════════ -->
+
+        <!--
+            FileProvider for APK Sharing
+            Enables secure sharing of APK files between Atlas and external
+            applications (e.g., package installers, file managers).
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_provider_paths" />
+
+        </provider>
+
+        <!--
+            Shizuku Provider
+            Content provider required by the Shizuku library for
+            elevated IPC operations without root access.
+        -->
+        <provider
+            android:name="dev.rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:exported="true"
+            android:enabled="true"
+            android:multiprocess="false" />
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             META-DATA
+             ═══════════════════════════════════════════════════════════════════ -->
+
+        <!-- Hilt: Enable aggregated compile-time dependency injection -->
+        <meta-data
+            android:name="dagger.hilt.android.HiltAndroidApp"
+            android:value="" />
+
+    </application>
+
+</manifest>

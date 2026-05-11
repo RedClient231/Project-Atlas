@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ~ Project Atlas - Android Virtual Space
+  ~
+  ~ String Resources
+  ~ All user-facing strings for the application. Organized by feature area.
+  -->
+<resources>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         App Identity
+         ═══════════════════════════════════════════════════════════════ -->
+    <string name="app_name">Project Atlas</string>
+    <string name="app_name_short">Atlas</string>
+    <string name="app_description">Run apps in a parallel virtual space without root</string>
+    <string name="app_version_format">v%1$s (%2$d)</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Navigation Labels
+         ═══════════════════════════════════════════════════════════════ -->
+    <string name="nav_home">Home</string>
+    <string name="nav_apps">My Apps</string>
+    <string name="nav_install">Install</string>
+    <string name="nav_settings">Settings</string>
+    <string name="nav_logcat">Logcat</string>
+    <string name="nav_about">About</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Install States
+         ═══════════════════════════════════════════════════════════════ -->
+    <string name="install_state_idle">Ready to install</string>
+    <string name="install_state_parsing">Parsing APK…</string>
+    <string name="install_state_installing">Installing…</string>
+    <string name="install_state_extracting_libs">Extracting native libraries…</string>
+    <string name="install_state_optimizing">Optimizing dex…</string>
+    <string name="install_state_success">Installed successfully</string>
+    <string name="install_state_failed">Installation failed</string>
+    <string name="install_state_cancelled">Installation cancelled</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Error Messages
+         ═══════════════════════════════════════════════════════════════ -->
+    <string name="error_generic">Something went wrong. Please try again.</string>
+    <string name="error_apk_invalid">The selected file is not a valid APK.</string>
+    <string name="error_apk_read_failed">Could not read the APK file.</string>
+    <string name="error_install_failed">Failed to install the app: %1$s</string>
+    <string name="error_launch_failed">Failed to launch the app.</string>
+    <string name="error_engine_not_running">Virtual engine is not running.</string>
+    <string name="error_shizuku_unavailable">Shizuku is not available. Install and start Shizuku for elevated operations.</string>
+    <string name="error_permission_denied">Permission denied: %1$s</string>
+    <string name="error_storage_access">Cannot access storage. Grant storage permission and try again.</string>
+    <string name="error_insufficient_storage">Not enough storage space to install this app.</string>
+    <string name="error_app_already_installed">This app is already installed in the virtual space.</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Settings Labels
+         ═══════════════════════════════════════════════════════════════ -->
+    <string name="settings_engine">Virtual Engine</string>
+    <string name="settings_auto_start">Auto-start on boot</string>
+    <string name="settings_auto_start_desc">Start the virtual engine when the device boots</string>
+    <string name="settings_notification">Foreground Notification</string>
+    <string name="settings_notification_desc">Show a persistent notification while the engine is running</string>
+    <string name="settings_gg_compat">GameGuardian Compatibility</string>
+    <string name="settings_gg_compat_desc">Enable hooks that allow GG to detect virtual processes</string>
+    <string name="settings_shizuku">Shizuku Integration</string>
+    <string name="settings_shizuku_desc">Use Shizuku for elevated operations without root</string>
+    <string name="settings_max_concurrent">Max concurrent apps</string>
+    <string name="settings_64bit_support">64-bit support</string>
+    <string name="settings_64bit_support_desc">Enable 64-bit virtual process support</string>
+    <string name="settings_clear_data">Clear virtual data</string>
+    <string name="settings_clear_data_desc">Delete all virtual app data and reset the environment</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Logcat Levels
+         ═══════════════════════════════════════════════════════════════ -->
+    <string name="logcat_level_verbose">Verbose</string>
+    <string name="logcat_level_debug">Debug</string>
+    <string name="logcat_level_info">Info</string>
+    <string name="logcat_level_warn">Warning</string>
+    <string name="logcat_level_error">Error</string>
+    <string name="logcat_level_fatal">Fatal</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Permissions Rationale
+         ═══════════════════════════════════════════════════════════════ -->
+    <string name="permission_storage_rationale">Storage access is needed to import APK files from your device.</string>
+    <string name="permission_notification_rationale">Notification permission is required to show the virtual engine foreground service.</string>
+    <string name="permission_shizuku_rationale">Shizuku permission allows Atlas to perform system-level operations like silent app installation without root.</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Empty States
+         ═══════════════════════════════════════════════════════════════ -->
+    <string name="empty_no_apps">No virtual apps installed yet.\nTap + to install your first app.</string>
+    <string name="empty_no_logs">No log entries yet.\nLaunch a virtual app to see its logs.</string>
+    <string name="empty_search_no_results">No apps matching your search.</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Dialog Messages
+         ═══════════════════════════════════════════════════════════════ -->
+    <string name="dialog_uninstall_title">Uninstall App</string>
+    <string name="dialog_uninstall_message">Are you sure you want to uninstall %1$s from the virtual space? All app data will be deleted.</string>
+    <string name="dialog_uninstall_confirm">Uninstall</string>
+    <string name="dialog_clear_data_title">Clear Virtual Data</string>
+    <string name="dialog_clear_data_message">This will delete ALL virtual app data and reset the virtual environment. This action cannot be undone.</string>
+    <string name="dialog_clear_data_confirm">Clear All</string>
+    <string name="dialog_force_stop_title">Force Stop</string>
+    <string name="dialog_force_stop_message">Force stopping %1$s may cause it to malfunction. Continue?</string>
+    <string name="dialog_force_stop_confirm">Force Stop</string>
+    <string name="dialog_cancel">Cancel</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         General Actions
+         ═══════════════════════════════════════════════════════════════ -->
+    <string name="action_install">Install</string>
+    <string name="action_launch">Launch</string>
+    <string name="action_uninstall">Uninstall</string>
+    <string name="action_force_stop">Force Stop</string>
+    <string name="action_search">Search</string>
+    <string name="action_filter">Filter</string>
+    <string name="action_refresh">Refresh</string>
+    <string name="action_share">Share</string>
+    <string name="action_copy">Copy</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Engine Status
+         ═══════════════════════════════════════════════════════════════ -->
+    <string name="engine_status_running">Engine Running</string>
+    <string name="engine_status_stopped">Engine Stopped</string>
+    <string name="engine_status_starting">Starting Engine…</string>
+    <string name="engine_status_stopping">Stopping Engine…</string>
+    <string name="engine_running_apps_count">%1$d app(s) running</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Notifications
+         ═══════════════════════════════════════════════════════════════ -->
+    <string name="notification_engine_channel_name">Virtual Engine</string>
+    <string name="notification_engine_channel_desc">Shows when the virtual engine is running</string>
+    <string name="notification_engine_title">Atlas Engine Active</string>
+    <string name="notification_engine_text">Virtual environment is running (%1$d apps)</string>
+    <string name="notification_logcat_channel_name">Logcat Monitor</string>
+    <string name="notification_logcat_channel_desc">Shows when logcat monitoring is active</string>
+
+</resources>

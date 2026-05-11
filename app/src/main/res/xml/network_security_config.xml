@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ~ Project Atlas - Android Virtual Space
+  ~
+  ~ Network Security Configuration
+  ~ Enforces HTTPS-only communication with debug-only cleartext exceptions
+  ~ and certificate pinning for release builds.
+  -->
+<network-security-config>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Base configuration — no cleartext traffic allowed
+         ═══════════════════════════════════════════════════════════════ -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Debug-only configuration — permits cleartext for local testing
+         Only active when android:debuggable="true" in the manifest
+         ═══════════════════════════════════════════════════════════════ -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Release pin enforcement — certificate pinning for API endpoints
+         Only active in release builds (not debug-overrides)
+         ═══════════════════════════════════════════════════════════════ -->
+    <domain-config>
+        <domain includeSubdomains="true">atlas-project.dev</domain>
+        <pin-set expiration="2026-12-31">
+            <!-- Primary pin — SHA-256 hash of the leaf certificate -->
+            <pin digest="SHA-256">WucWE2NhVmRNgFQ9r34oXQSdZcGH5RVHGQ5N2SYU8Y4=</pin>
+            <!-- Backup pin — SHA-256 hash of the backup/CA certificate -->
+            <pin digest="SHA-256">k2v657xBsOVe1PQRwOsHsw3bsGT2VzIqz5K+59sNQws=</pin>
+        </pin-set>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+</network-security-config>
