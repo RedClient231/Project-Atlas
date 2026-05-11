@@ -1,3 +1,0 @@
-/home/z/my-project/Project-Atlas/app/.cxx/RelWithDebInfo/2k4w9628/arm64-v8a/CMakeFiles/atlas_native.dir
-/home/z/my-project/Project-Atlas/app/.cxx/RelWithDebInfo/2k4w9628/arm64-v8a/CMakeFiles/edit_cache.dir
-/home/z/my-project/Project-Atlas/app/.cxx/RelWithDebInfo/2k4w9628/arm64-v8a/CMakeFiles/rebuild_cache.dir
