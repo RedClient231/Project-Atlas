@@ -70,8 +70,9 @@
 -keepclassmembers class dev.rikka.shizuku.** { *; }
 -keep class * extends dev.rikka.shizuku.server.ShizukuService { *; }
 
-# Shizuku's hidden API stubs
--keep class dev.rikka.hidden.** { *; }
+# Shizuku's hidden API stubs — compileOnly, so R8 won't see them.
+# If they somehow end up on the classpath, don't keep them.
+-dontwarn dev.rikka.hidden.**
 
 # ─── Native Methods ────────────────────────────────────────────────────────
 # All JNI native method names must be preserved for correct symbol resolution.
@@ -342,13 +343,6 @@
 
 -keep class META-INF.services.** { *; }
 
-# ─── General Warnings Suppression ──────────────────────────────────────────
-
--dontwarn javax.annotation.**
--dontwarn org.codehaus.**
--dontwarn java.lang.invoke.StringConcatFactory
--dontwarn java.lang.invoke.VarHandle
-
 # ─── Custom Application Classes ────────────────────────────────────────────
 # Hilt's generated application component requires specific class retention
 
@@ -377,3 +371,35 @@
 # ─── Boot Receiver ─────────────────────────────────────────────────────────
 
 -keep class com.atlas.virtualspace.receiver.** { *; }
+
+# ─── Refine / Hidden API Stubs ────────────────────────────────────────────
+# dev.rikka.hidden:stub is compileOnly — the *Hidden classes and their
+# refine.android.* superclasses do NOT exist at runtime. If any transitive
+# dependency still pulls them in, tell R8 to ignore the missing references.
+
+-dontwarn refine.**
+-dontwarn dev.rikka.tools.refine.**
+
+# The *Hidden classes from dev.rikka.hidden:stub should not be in the APK
+# since the dependency is compileOnly. If any transitive dep re-introduces
+# them, they will reference refine.* classes that don't exist at runtime.
+# R8 will shrink them away as unreachable if not explicitly kept.
+
+# ─── Apache Commons Lang3 (transitive) ─────────────────────────────────────
+# commons-lang3 references java.lang.invoke.MethodHandleProxies and
+# java.lang.reflect.AnnotatedType which don't exist on Android.
+# We exclude commons-lang3 from commons-compress, but in case any other
+# transitive dep brings it in, suppress the warnings.
+
+-dontwarn org.apache.commons.lang3.**
+-dontwarn java.lang.invoke.MethodHandleProxies
+-dontwarn java.lang.reflect.AnnotatedType
+
+# ─── General Warnings Suppression ──────────────────────────────────────────
+# Suppress warnings for JDK classes not available on Android and
+# compile-only / optional dependencies.
+
+-dontwarn javax.annotation.**
+-dontwarn org.codehaus.**
+-dontwarn java.lang.invoke.StringConcatFactory
+-dontwarn java.lang.invoke.VarHandle
