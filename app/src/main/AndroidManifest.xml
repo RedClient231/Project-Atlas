@@ -105,7 +105,7 @@
             used by the Pine hooking framework for method interception.
         -->
         <uses-native-library
-            android:name="libatlas_hooks.so"
+            android:name="libatlas_native.so"
             android:required="false" />
 
         <!-- ═══════════════════════════════════════════════════════════════════
@@ -221,7 +221,7 @@
             elevated IPC operations without root access.
         -->
         <provider
-            android:name="dev.rikka.shizuku.ShizukuProvider"
+            android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"
             android:exported="true"
             android:enabled="true"
