@@ -5,6 +5,8 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.atlas.virtualspace.core.pm.VirtualAppInfo
 
 /**
@@ -17,7 +19,7 @@ import com.atlas.virtualspace.core.pm.VirtualAppInfo
  */
 @Database(
     entities = [VirtualAppInfo::class, AppLogEntry::class],
-    version = 1,
+    version = 2,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -55,7 +57,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     DATABASE_NAME
                 )
-                    .addMigrations()       // Future migrations go here
+                    .addMigrations(MIGRATION_1_2)
                     .fallbackToDestructiveMigration()
                     .setJournalMode(JournalMode.AUTOMATIC)
                     .build()
@@ -72,6 +74,21 @@ abstract class AppDatabase : RoomDatabase() {
             synchronized(this) {
                 INSTANCE?.close()
                 INSTANCE = null
+            }
+        }
+
+        /**
+         * Migration 1 → 2: adds the [VirtualAppInfo.isInstalledOnDevice] column.
+         *
+         * Existing rows default to 0 (false) — apps already imported before
+         * this migration will be asked to install once on next launch, after
+         * which the flag is set and never asked again.
+         */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE virtual_apps ADD COLUMN isInstalledOnDevice INTEGER NOT NULL DEFAULT 0"
+                )
             }
         }
     }

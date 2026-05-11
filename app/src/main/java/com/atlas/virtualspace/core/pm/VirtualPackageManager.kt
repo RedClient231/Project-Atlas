@@ -290,6 +290,25 @@ object VirtualPackageManager {
     }
 
     /**
+     * Marks the app as installed on the real device.
+     *
+     * Called by [VirtualStubActivity] after a successful device install
+     * (Shizuku silent install or system installer dialog accepted).
+     * After this is set, subsequent Launch taps skip the install dialog.
+     */
+    fun markInstalledOnDevice(packageName: String) {
+        if (!isInitialized()) return
+        try {
+            runBlocking(Dispatchers.IO) {
+                dao.markInstalledOnDevice(packageName)
+            }
+            Timber.i("Marked %s as installed on device — future launches will be direct", packageName)
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to mark %s as installed on device", packageName)
+        }
+    }
+
+    /**
      * Returns the app icon from the virtual APK, or null if it cannot be loaded.
      */
     fun getAppIcon(packageName: String): Drawable? {

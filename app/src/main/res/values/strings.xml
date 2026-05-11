@@ -188,6 +188,8 @@
     <string name="action_dismiss">Dismiss</string>
     <string name="action_create_shortcut">Create Shortcut</string>
     <string name="action_clear_data">Clear Data</string>
+    <!-- Shown on first Launch tap when app has not yet been installed on the real device -->
+    <string name="action_install_and_launch">Install &amp; Launch</string>
 
     <!-- ═══════════════════════════════════════════════════════════════
          Logcat Screen

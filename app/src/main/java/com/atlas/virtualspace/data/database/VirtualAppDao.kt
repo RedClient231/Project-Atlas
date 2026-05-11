@@ -60,6 +60,19 @@ interface VirtualAppDao {
     suspend fun updateLaunchStats(pkg: String, time: Long)
 
     /**
+     * Marks the app as installed on the real device.
+     *
+     * Called by [VirtualStubActivity] after:
+     * - A Shizuku silent install succeeds, OR
+     * - The user accepts the system package installer dialog.
+     *
+     * Once this is set to true, subsequent Launch taps skip the install
+     * dialog and go straight to [tryDirectLaunch].
+     */
+    @Query("UPDATE virtual_apps SET isInstalledOnDevice = 1 WHERE packageName = :pkg")
+    suspend fun markInstalledOnDevice(pkg: String)
+
+    /**
      * Returns the total number of installed virtual apps.
      */
     @Query("SELECT COUNT(*) FROM virtual_apps")

@@ -41,5 +41,16 @@ data class VirtualAppInfo(
     val installType: InstallType,
     val dataUsageBytes: Long = 0,
     val lastLaunchTime: Long = 0,
-    val launchCount: Int = 0
+    val launchCount: Int = 0,
+    /**
+     * True once the APK has been successfully installed on the real device
+     * (either silently via Shizuku or by the user accepting the system installer dialog).
+     *
+     * After this is true, subsequent taps on "Launch" skip the install dialog
+     * entirely and go straight to [tryDirectLaunch] in VirtualStubActivity,
+     * so the user never sees the "Do you want to install?" prompt again.
+     *
+     * Default is false (newly imported APKs are not on the real device yet).
+     */
+    val isInstalledOnDevice: Boolean = false
 )
