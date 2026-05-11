@@ -2,51 +2,15 @@
 <!--
   ~ Project Atlas - Android Virtual Space
   ~
-  ~ Material 3 Theme for the Activity window.
-  ~ Compose handles its own theming; this is only for the Activity window backdrop.
+  ~ Minimal XML theme for the Activity window.
+  ~ Compose handles its own theming via AtlasTheme composable.
+  ~ This theme only sets up the window chrome (status bar, nav bar).
   -->
 <resources>
 
-    <!-- Base Application Theme (DayNight) -->
+    <!-- Base Application Theme -->
     <style name="Theme.Atlas" parent="Theme.Material3.DayNight.NoActionBar">
-
-        <!-- Primary brand color -->
-        <item name="colorPrimary">@color/primary</item>
-        <item name="colorOnPrimary">@color/on_primary</item>
-        <item name="colorPrimaryContainer">@color/primary_container</item>
-        <item name="colorOnPrimaryContainer">@color/on_primary_container</item>
-
-        <!-- Secondary brand color -->
-        <item name="colorSecondary">@color/secondary</item>
-        <item name="colorOnSecondary">@color/on_secondary</item>
-        <item name="colorSecondaryContainer">@color/secondary_container</item>
-        <item name="colorOnSecondaryContainer">@color/on_secondary_container</item>
-
-        <!-- Tertiary brand color -->
-        <item name="colorTertiary">@color/tertiary</item>
-        <item name="colorOnTertiary">@color/on_tertiary</item>
-
-        <!-- Error color -->
-        <item name="colorError">@color/error</item>
-        <item name="colorOnError">@color/on_error</item>
-
-        <!-- Background & surface -->
-        <item name="android:colorBackground">@color/background</item>
-        <item name="colorOnBackground">@color/on_background</item>
-        <item name="colorSurface">@color/surface</item>
-        <item name="colorOnSurface">@color/on_surface</item>
-        <item name="colorSurfaceVariant">@color/surface_variant</item>
-        <item name="colorOnSurfaceVariant">@color/on_surface_variant</item>
-
-        <!-- Outline -->
-        <item name="colorOutline">@color/outline</item>
-
-        <!-- Inverse colors -->
-        <item name="colorInverseSurface">@color/inverse_surface</item>
-        <item name="colorInverseOnSurface">@color/inverse_on_surface</item>
-        <item name="colorInversePrimary">@color/inverse_primary</item>
-
-        <!-- Transparent status/navigation bars -->
+        <!-- Transparent status/navigation bars for edge-to-edge -->
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
 
@@ -56,7 +20,6 @@
 
         <!-- Edge-to-edge display -->
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
-
     </style>
 
     <!-- Splash Theme (pre-Android 12 fallback) -->
