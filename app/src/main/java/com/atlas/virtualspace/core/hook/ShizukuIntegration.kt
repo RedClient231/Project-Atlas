@@ -367,29 +367,34 @@ object ShizukuIntegration {
         return runCatching {
             Log.i(TAG, "Installing APK via Shizuku: $apkPath")
 
-            // Copy the APK to a temporary world-readable location first,
-            // since `pm install` runs as shell user and may not have access
-            // to the app's private directory.
+            // Try direct install first (works if the file is world-readable,
+            // e.g. staged in cache with setReadable(true, false))
+            val directResult = executeWithShizuku("pm install -r -t -g \"$apkPath\"")
+            if (directResult.isSuccess) {
+                val output = directResult.getOrDefault("")
+                if (output.contains("Success", ignoreCase = true)) {
+                    Log.i(TAG, "APK installed successfully via direct Shizuku install: $apkPath")
+                    return Result.success(true)
+                }
+                // If output doesn't contain Success, it might still have worked
+                // on some ROMs. Fall through to try the tmp approach.
+                Log.w(TAG, "Direct install output: $output")
+            }
+
+            // Fallback: copy to /data/local/tmp/ first
             val tmpApkPath = "/data/local/tmp/atlas_install_${System.currentTimeMillis()}.apk"
 
-            // Copy to tmp
             val copyResult = executeWithShizuku("cp \"$apkPath\" \"$tmpApkPath\" && chmod 644 \"$tmpApkPath\"")
             if (copyResult.isFailure) {
-                Log.w(TAG, "Failed to copy APK to tmp — trying direct install")
-                // Try direct install without copying
-                val directResult = executeWithShizuku("pm install -r -t \"$apkPath\"")
-                if (directResult.isFailure) {
-                    return Result.failure(
-                        directResult.exceptionOrNull()
-                            ?: RuntimeException("Direct install failed")
-                    )
-                }
-                val success = directResult.getOrDefault("").contains("Success", ignoreCase = true)
+                Log.w(TAG, "Failed to copy APK to tmp")
+                // Return the result of the direct attempt
+                val directOutput = directResult.getOrDefault("")
+                val success = directOutput.contains("Success", ignoreCase = true)
                 return Result.success(success)
             }
 
             // Install from tmp
-            val installResult = executeWithShizuku("pm install -r -t \"$tmpApkPath\"")
+            val installResult = executeWithShizuku("pm install -r -t -g \"$tmpApkPath\"")
 
             // Clean up tmp file
             executeWithShizuku("rm -f \"$tmpApkPath\"")

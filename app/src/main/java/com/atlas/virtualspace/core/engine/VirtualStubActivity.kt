@@ -3,13 +3,15 @@ package com.atlas.virtualspace.core.engine
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import com.atlas.virtualspace.core.hook.ShizukuIntegration
 import com.atlas.virtualspace.core.pm.VirtualPackageManager
-import dalvik.system.DexClassLoader
 import timber.log.Timber
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 
 /**
  * Proxy activity that bridges the Android system with virtual apps running
@@ -26,12 +28,13 @@ import java.io.File
  *    This is the fastest and most reliable path.
  *
  * 2. **Shizuku install + launch**: If Shizuku is available and the app is
- *    NOT installed on the real device, install it silently via `pm install`
- *    through Shizuku, then launch via `am start`. The app runs in its own
- *    process with full Android lifecycle and GPU support.
+ *    NOT installed on the real device, copy the APK to a temp location
+ *    accessible by Shizuku, install silently via `pm install`, then launch
+ *    via `am start`.
  *
- * 3. **System package installer**: If Shizuku is unavailable, show the
- *    standard Android install dialog. After installation, launch the app.
+ * 3. **System package installer**: If Shizuku is unavailable, copy the APK
+ *    to the cache directory, get a FileProvider URI, and show the standard
+ *    Android install dialog. After installation, launch the app.
  *
  * ## Why install on the real device?
  *
@@ -109,6 +112,58 @@ class VirtualStubActivity : Activity() {
     }
 
     /**
+     * Copies the APK from virtual storage to a staging directory in the app's
+     * cache that is accessible to FileProvider and Shizuku.
+     *
+     * The virtual root is at /data/data/{atlas}/virtual_root/apps/{pkg}/base.apk
+     * which is NOT accessible to the system package installer or Shizuku's
+     * shell process. We copy to /data/data/{atlas}/cache/atlas_install/ which
+     * IS accessible via our FileProvider configuration.
+     *
+     * @return The staged File, or null if the copy failed.
+     */
+    private fun stageApkForInstall(apkPath: String, packageName: String): File? {
+        return try {
+            val sourceFile = File(apkPath)
+            if (!sourceFile.exists()) {
+                Timber.e("Stage APK: source does not exist: %s", apkPath)
+                return null
+            }
+
+            // Create staging directory in cache (accessible to FileProvider)
+            val stagingDir = File(cacheDir, "atlas_install")
+            if (!stagingDir.exists() && !stagingDir.mkdirs()) {
+                Timber.e("Stage APK: failed to create staging dir: %s", stagingDir.absolutePath)
+                return null
+            }
+
+            // Clean up old staged APKs
+            stagingDir.listFiles()?.forEach { it.delete() }
+
+            // Copy APK to staging with a sanitized name
+            val stagedFile = File(stagingDir, "${packageName.replace('.', '_')}.apk")
+            FileInputStream(sourceFile).use { input ->
+                FileOutputStream(stagedFile).use { output ->
+                    val buffer = ByteArray(8192)
+                    var read: Int
+                    while (input.read(buffer).also { read = it } != -1) {
+                        output.write(buffer, 0, read)
+                    }
+                }
+            }
+
+            // Make the file world-readable so Shizuku shell can access it
+            stagedFile.setReadable(true, false)
+
+            Timber.i("Stage APK: copied %s → %s (%d bytes)", apkPath, stagedFile.absolutePath, stagedFile.length())
+            stagedFile
+        } catch (e: Exception) {
+            Timber.e(e, "Stage APK: failed to copy APK for installation")
+            null
+        }
+    }
+
+    /**
      * Attempts to launch the app directly if it's already installed on the
      * real device. This is the fastest and most reliable path.
      *
@@ -163,6 +218,7 @@ class VirtualStubActivity : Activity() {
      * the activity using `am start`.
      *
      * This runs on a background thread because Shizuku operations are blocking.
+     * The APK is first staged to a temp location accessible by Shizuku's shell.
      */
     private fun launchViaShizuku(
         packageName: String,
@@ -170,13 +226,34 @@ class VirtualStubActivity : Activity() {
         apkPath: String,
         nativeLibPath: String?
     ) {
+        // Stage the APK to a location accessible by Shizuku
+        val stagedApk = stageApkForInstall(apkPath, packageName)
+        if (stagedApk == null) {
+            Toast.makeText(this, "Error: Failed to prepare APK for installation", Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+
         // Show a brief toast so the user knows something is happening
         Toast.makeText(this, "Installing ${packageName.substringAfterLast('.')}...", Toast.LENGTH_SHORT).show()
 
         Thread {
             try {
-                // Step 1: Install the APK via Shizuku
-                val installResult = ShizukuIntegration.installAppWithShizuku(apkPath)
+                // Step 1: Copy the staged APK to /data/local/tmp/ which is
+                // guaranteed to be accessible by Shizuku's shell process.
+                val tmpApkPath = "/data/local/tmp/atlas_install_${System.currentTimeMillis()}.apk"
+                val copyResult = ShizukuIntegration.executeWithShizuku("cp \"${stagedApk.absolutePath}\" \"$tmpApkPath\" && chmod 644 \"$tmpApkPath\"")
+                
+                val installPath = if (copyResult.isSuccess) {
+                    tmpApkPath
+                } else {
+                    Timber.w(copyResult.exceptionOrNull(), "Shizuku cp to tmp failed — trying direct install from staging")
+                    // Try direct install from the staged location
+                    stagedApk.absolutePath
+                }
+
+                // Step 2: Install the APK via Shizuku
+                val installResult = ShizukuIntegration.installAppWithShizuku(installPath)
                 if (installResult.isFailure) {
                     Timber.w(installResult.exceptionOrNull(), "Shizuku install failed for %s", packageName)
                     // Even if install fails (e.g. app already installed), try to launch anyway
@@ -184,10 +261,15 @@ class VirtualStubActivity : Activity() {
                     Timber.i("Shizuku install succeeded for %s", packageName)
                 }
 
+                // Clean up /data/local/tmp copy
+                if (installPath == tmpApkPath) {
+                    ShizukuIntegration.executeWithShizuku("rm -f \"$tmpApkPath\"")
+                }
+
                 // Small delay to let the package manager register the app
                 Thread.sleep(1500)
 
-                // Step 2: Try launching with the exact activity class
+                // Step 3: Try launching with the exact activity class
                 val launchCmd = "am start -n $packageName/$activityClass"
                 val launchResult = ShizukuIntegration.executeWithShizuku(launchCmd)
 
@@ -252,26 +334,29 @@ class VirtualStubActivity : Activity() {
     /**
      * Installs the APK using the system package installer and then launches it.
      * This shows the system install confirmation dialog to the user.
+     *
+     * The APK is first staged to the cache directory, then shared via
+     * FileProvider with a content:// URI.
      */
     private fun installAndLaunch(packageName: String, activityClass: String, apkPath: String) {
         try {
-            val apkFile = File(apkPath)
-            if (!apkFile.exists()) {
-                Toast.makeText(this, "APK file not found: $apkPath", Toast.LENGTH_LONG).show()
+            // Stage the APK to cache directory (accessible by FileProvider)
+            val stagedApk = stageApkForInstall(apkPath, packageName)
+            if (stagedApk == null) {
+                Toast.makeText(this, "Error: Failed to prepare APK for installation", Toast.LENGTH_LONG).show()
                 finish()
                 return
             }
 
-            // Try FileProvider URI first
+            // Get a content URI via FileProvider
             val uri = try {
                 androidx.core.content.FileProvider.getUriForFile(
                     this,
                     "${applicationInfo.packageName}.fileprovider",
-                    apkFile
+                    stagedApk
                 )
             } catch (e: Exception) {
-                Timber.w(e, "FileProvider failed for %s — trying content URI fallback", apkPath)
-                // Fallback: try using a content URI via MediaStore
+                Timber.e(e, "FileProvider failed for staged APK: %s", stagedApk.absolutePath)
                 null
             }
 
@@ -293,14 +378,13 @@ class VirtualStubActivity : Activity() {
 
                 startActivity(installIntent)
             } else {
-                // Last resort: try to launch via Shizuku without installing first
-                // (in case the app is already installed but we couldn't detect it)
+                // Last resort: try direct file URI (may not work on Android 7+)
+                Timber.w("FileProvider URI failed — cannot install without Shizuku or FileProvider")
                 Toast.makeText(
                     this,
                     "Cannot install without Shizuku. Please install Shizuku and grant permission.",
                     Toast.LENGTH_LONG
                 ).show()
-                Timber.w("No way to install/launch %s — Shizuku not available and FileProvider failed", packageName)
             }
 
             finish()

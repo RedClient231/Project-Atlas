@@ -33,8 +33,9 @@ local.properties
 .navigation/
 captures/
 
-# Keystore files
+# Keystore files (except our release keystore needed by CI)
 *.jks
+!atlas-release.jks
 *.keystore
 
 # Log Files

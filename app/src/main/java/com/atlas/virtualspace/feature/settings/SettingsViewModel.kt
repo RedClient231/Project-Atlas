@@ -65,7 +65,7 @@ data class SettingsUiState(
     val heapSizeMultiplier: Int = 1,
     val enableNativeHooks: Boolean = true,
     val enable64BitSupport: Boolean = true,
-    val shizukuStatus: String = "unknown",
+    val shizukuStatus: String = ShizukuIntegration.getShizukuStatus(),
     val storageInfo: StorageInfo = StorageInfo(0L, 0L, 0L, 0),
     val isClearingData: Boolean = false,
     val isExporting: Boolean = false,

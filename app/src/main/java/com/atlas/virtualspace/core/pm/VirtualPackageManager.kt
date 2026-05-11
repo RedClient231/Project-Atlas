@@ -40,6 +40,23 @@ object VirtualPackageManager {
     private lateinit var appContext: Context
     private lateinit var dao: VirtualAppDao
 
+    /**
+     * Returns true if all lateinit properties have been initialized.
+     * Used to prevent UninitializedPropertyAccessException.
+     */
+    private fun isInitialized(): Boolean {
+        return ::database.isInitialized && ::appContext.isInitialized && ::dao.isInitialized
+    }
+
+    /**
+     * Ensures initialization by throwing a descriptive error if not ready.
+     */
+    private fun requireInitialized() {
+        check(::appContext.isInitialized) { "VirtualPackageManager: appContext not initialized. Call setContext() first." }
+        check(::database.isInitialized) { "VirtualPackageManager: database not initialized. Call initialize() first." }
+        check(::dao.isInitialized) { "VirtualPackageManager: dao not initialized. Call initialize() first." }
+    }
+
     // ───────────────────────── Initialisation ─────────────────────────────────
 
     /**
@@ -78,6 +95,7 @@ object VirtualPackageManager {
      * @return         The persisted [VirtualAppInfo] on success.
      */
     fun installApp(apkFile: File, type: InstallType): Result<VirtualAppInfo> = runCatching {
+        requireInitialized()
         require(apkFile.exists()) { "APK file does not exist: ${apkFile.absolutePath}" }
         require(apkFile.canRead()) { "APK file is not readable: ${apkFile.absolutePath}" }
 
@@ -146,6 +164,7 @@ object VirtualPackageManager {
      * [installApp], then installs split APKs and OBB.
      */
     fun installXapk(xapkFile: File): Result<VirtualAppInfo> = runCatching {
+        requireInitialized()
         require(xapkFile.exists()) { "XAPK file does not exist: ${xapkFile.absolutePath}" }
 
         // Temporary extraction directory
@@ -243,16 +262,31 @@ object VirtualPackageManager {
 
     // ───────────────────────── Queries ────────────────────────────────────────
 
-    fun getAppInfo(packageName: String): VirtualAppInfo? = runBlocking(Dispatchers.IO) {
-        dao.getByPackage(packageName)
+    fun getAppInfo(packageName: String): VirtualAppInfo? {
+        if (!isInitialized()) {
+            Timber.w("VirtualPackageManager not initialized when getAppInfo(%s) called", packageName)
+            return null
+        }
+        return runBlocking(Dispatchers.IO) {
+            dao.getByPackage(packageName)
+        }
     }
 
-    fun getInstalledApps(): List<VirtualAppInfo> = runBlocking(Dispatchers.IO) {
-        dao.getAll().first()
+    fun getInstalledApps(): List<VirtualAppInfo> {
+        if (!isInitialized()) {
+            Timber.w("VirtualPackageManager not initialized when getInstalledApps() called")
+            return emptyList()
+        }
+        return runBlocking(Dispatchers.IO) {
+            dao.getAll().first()
+        }
     }
 
-    fun isAppInstalled(packageName: String): Boolean = runBlocking(Dispatchers.IO) {
-        dao.getByPackage(packageName) != null
+    fun isAppInstalled(packageName: String): Boolean {
+        if (!isInitialized()) return false
+        return runBlocking(Dispatchers.IO) {
+            dao.getByPackage(packageName) != null
+        }
     }
 
     /**
@@ -291,6 +325,10 @@ object VirtualPackageManager {
      * are updated in the database.
      */
     fun launchApp(packageName: String): Result<Unit> = runCatching {
+        if (!isInitialized()) {
+            throw IllegalStateException("VirtualPackageManager not initialized. Please restart Atlas.")
+        }
+
         val appInfo = getAppInfo(packageName)
             ?: throw IllegalArgumentException("App not installed: $packageName")
 
@@ -298,13 +336,21 @@ object VirtualPackageManager {
             throw IllegalStateException("App is disabled: $packageName")
         }
 
-        // Refresh mount points
-        VirtualMountManager.setupAppMounts(packageName, appInfo).getOrThrow()
+        // Setup mount points (non-fatal — the app runs on the real device)
+        try {
+            VirtualMountManager.setupAppMounts(packageName, appInfo).getOrThrow()
+        } catch (e: Exception) {
+            Timber.w(e, "Mount setup failed for %s — continuing with launch", packageName)
+        }
 
         // Update launch statistics
         val now = System.currentTimeMillis()
-        runBlocking(Dispatchers.IO) {
-            dao.updateLaunchStats(packageName, now)
+        try {
+            runBlocking(Dispatchers.IO) {
+                dao.updateLaunchStats(packageName, now)
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to update launch stats for %s", packageName)
         }
 
         // Delegate to VirtualEngine (in core.engine package)

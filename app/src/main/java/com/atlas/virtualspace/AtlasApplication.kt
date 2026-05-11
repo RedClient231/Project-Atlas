@@ -154,18 +154,10 @@ class AtlasApplication : Application() {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
             if (!Environment.isExternalStorageManager()) {
                 Timber.w("MANAGE_EXTERNAL_STORAGE not granted — log files may not be visible in Downloads")
-                // We don't auto-launch the settings screen here because it's
-                // disruptive. The Settings screen in the app should have a button
-                // to grant this permission. But we try to request it anyway.
-                try {
-                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                        data = Uri.parse("package:$packageName")
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    startActivity(intent)
-                } catch (e: Exception) {
-                    Timber.w(e, "Cannot launch storage permission settings")
-                }
+                // Don't auto-launch the settings screen — it's too disruptive on startup.
+                // The Settings screen has a button to grant this permission.
+                // The logcat export will try to use the Downloads directory anyway,
+                // and if MANAGE_EXTERNAL_STORAGE is granted later, it will work.
             } else {
                 Timber.i("MANAGE_EXTERNAL_STORAGE permission granted")
             }

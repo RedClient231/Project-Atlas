@@ -28,10 +28,19 @@
         name="internal_cache"
         path="." />
 
-    <!-- Virtual root APK directory — contains installed virtual APKs -->
-    <files-path
-        name="apk_dir"
-        path="virtual_root/apps/" />
+    <!--
+        IMPORTANT: The virtual_root is under Context.getDataDir() (/data/data/{pkg}/virtual_root/),
+        NOT under Context.getFilesDir() (/data/data/{pkg}/files/).
+        Since FileProvider doesn't have a <data-path> tag, we use <root-path> to grant
+        access to the entire app data directory. This is necessary for APK installation
+        via the system package installer and Shizuku.
+        
+        The APK files are at: /data/data/{pkg}/virtual_root/apps/{target_pkg}/base.apk
+        And the staging copies are at: /data/data/{pkg}/cache/atlas_install/
+    -->
+    <root-path
+        name="app_data"
+        path="." />
 
     <!-- Public Downloads directory for logcat exports and crash reports -->
     <external-path
