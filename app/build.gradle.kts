@@ -179,7 +179,7 @@ dependencies {
 
     // ─── Pine (Method Hooking - No Root, Android 13+) ────────
     implementation("top.canyie.pine:core:0.3.0")
-    implementation("top.canyie.pine:xposed:0.3.0")
+    implementation("top.canyie.pine:xposed:0.2.0")
 
     // ─── Shizuku (Elevated Operations Without Root) ──────────
     val shizukuVersion = "13.1.5"
