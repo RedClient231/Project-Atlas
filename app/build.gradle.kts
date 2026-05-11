@@ -183,7 +183,7 @@ dependencies {
     val shizukuVersion = "13.1.5"
     implementation("dev.rikka.shizuku:api:$shizukuVersion")
     implementation("dev.rikka.shizuku:provider:$shizukuVersion")
-    implementation("dev.rikka.hidden:stub:4.3.0")
+    implementation("dev.rikka.hidden:stub:4.3.3")
 
     // ─── APK Parsing ─────────────────────────────────────────
     implementation("net.dongliu:apk-parser:2.6.10")
