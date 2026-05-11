@@ -212,11 +212,13 @@ object VirtualEngine {
     /**
      * Launches a virtual application.
      *
-     * 1. Looks up the [VirtualAppInfo] for [packageName].
-     * 2. Creates an [InternalProcessRecord] with a fresh virtual UID.
-     * 3. Starts the virtual process via the IPC bridge.
-     * 4. Launches the app's main activity through [VirtualStubActivity],
-     *    which acts as a proxy to load the virtual app's classes.
+     * FIXES applied:
+     * 1. Engine-not-ready guard: if the engine hasn't initialised yet (because
+     *    the async DB init in AtlasApplication hasn't completed), we attempt
+     *    a synchronous init with a clear error rather than silently failing.
+     * 2. Null launchActivity: now caught with a clear user-facing error.
+     * 3. Already-running path: correctly uses VirtualStubActivity intent
+     *    instead of trying getLaunchIntentForPackage on an uninstalled package.
      *
      * @param packageName The package name of the app to launch.
      * @return [Result.success] if the launch was dispatched, [Result.failure] otherwise.
@@ -225,53 +227,66 @@ object VirtualEngine {
         return try {
             val appInfo = _installedApps.value.firstOrNull { it.packageName == packageName }
                 ?: return Result.failure(
-                    IllegalArgumentException("App not installed: $packageName")
+                    IllegalArgumentException("App not installed in virtual space: $packageName")
                 )
 
             if (!appInfo.isEnabled) {
+                return Result.failure(IllegalStateException("App is disabled: $packageName"))
+            }
+
+            // Ensure the engine is initialized before we try to launch.
+            // The async init in AtlasApplication may not have completed yet
+            // if the user taps "Launch" very quickly after first install.
+            if (!_isRunning.value) {
+                val ctx = applicationContext
+                    ?: return Result.failure(
+                        IllegalStateException(
+                            "Virtual engine is still starting up. Please wait a moment and try again."
+                        )
+                    )
+                Timber.w("VirtualEngine not running — attempting synchronous init before launch")
+                val initResult = initialize(ctx)
+                if (initResult.isFailure) {
+                    return Result.failure(
+                        IllegalStateException(
+                            "Virtual engine failed to start: ${initResult.exceptionOrNull()?.message}",
+                            initResult.exceptionOrNull()
+                        )
+                    )
+                }
+            }
+
+            val launchActivity = appInfo.launchActivity
+            if (launchActivity.isNullOrBlank()) {
                 return Result.failure(
-                    IllegalStateException("App is disabled: $packageName")
+                    IllegalStateException(
+                        "Cannot launch $packageName: no launcher activity found in APK manifest. " +
+                        "Try re-installing the app."
+                    )
                 )
             }
 
-            // Ensure the engine is initialized
-            if (!_isRunning.value) {
-                Timber.w("VirtualEngine not running — attempting to initialize before launch")
-                val ctx = applicationContext
-                    ?: return Result.failure(IllegalStateException("Application context not available"))
-                val initResult = initialize(ctx)
-                if (initResult.isFailure) {
-                    return Result.failure(IllegalStateException(
-                        "VirtualEngine is not running and cannot be initialized",
-                        initResult.exceptionOrNull()
-                    ))
-                }
-            }
+            val ctx = applicationContext
+                ?: return Result.failure(IllegalStateException("Application context not available"))
 
-            // If already running, try to bring to foreground via an intent.
+            // If already running, bring to foreground via VirtualStubActivity
+            // (NOT via PackageManager.getLaunchIntentForPackage — the app is
+            //  NOT installed on the real device in the import/file case).
             val existing = processRecords[packageName]
             if (existing != null && existing.isAlive()) {
-                Timber.i("App %s already running (pid %d) – bringing to foreground", packageName, existing.pid.get())
-                try {
-                    val ctx = applicationContext ?: return Result.failure(
-                        IllegalStateException("Application context not available")
-                    )
-                    val launchIntent = ctx.packageManager.getLaunchIntentForPackage(packageName)
-                    if (launchIntent != null) {
-                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                        ctx.startActivity(launchIntent)
-                        return Result.success(Unit)
-                    }
-                } catch (e: Exception) {
-                    Timber.w(e, "Failed to bring %s to foreground", packageName)
+                Timber.i("App %s already running (pid %d) — bringing to foreground", packageName, existing.pid.get())
+                val bringForwardIntent = android.content.Intent(ctx, VirtualStubActivity::class.java).apply {
+                    putExtra(VirtualStubActivity.EXTRA_PACKAGE_NAME, packageName)
+                    putExtra(VirtualStubActivity.EXTRA_ACTIVITY_CLASS, launchActivity)
+                    putExtra(VirtualStubActivity.EXTRA_VIRTUAL_LAUNCH, true)
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                 }
-                // If we can't bring it to foreground, still return success
-                // since it IS running.
+                ctx.startActivity(bringForwardIntent)
                 return Result.success(Unit)
             }
 
-            // Create a new process record.
+            // Create a new virtual process record.
             val virtualUid = virtualUidCounter.getAndIncrement()
             val is64Bit = appInfo.is64Bit && engineConfig.enable64BitSupport
 
@@ -282,52 +297,34 @@ object VirtualEngine {
                 is64Bit = is64Bit
             )
 
-            // Register the process.
             synchronized(processLock) {
                 processRecords[packageName] = record
             }
 
-            // Start the virtual process.
             startVirtualProcess(record, appInfo)
 
-            // Launch the main activity through VirtualStubActivity proxy.
-            // This is critical: the virtual app's package is NOT installed on
-            // the device, so Android's ActivityManager will reject a direct
-            // intent targeting it. Instead, we start VirtualStubActivity (which
-            // IS declared in the manifest) and pass the target package/activity
-            // as extras. The stub loads the virtual APK via PathClassLoader and
-            // starts the real activity.
-            val launchActivity = appInfo.launchActivity
-            if (launchActivity != null) {
-                val ctx = applicationContext
-                    ?: return Result.failure(IllegalStateException("Application context not available"))
-
-                val stubIntent = android.content.Intent(ctx, VirtualStubActivity::class.java).apply {
-                    putExtra(VirtualStubActivity.EXTRA_PACKAGE_NAME, packageName)
-                    putExtra(VirtualStubActivity.EXTRA_ACTIVITY_CLASS, launchActivity)
-                    putExtra(VirtualStubActivity.EXTRA_VIRTUAL_LAUNCH, true)
-                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                    addFlags(android.content.Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-                }
-
-                ctx.startActivity(stubIntent)
-
-                Timber.i("Launched %s via VirtualStubActivity → %s", packageName, launchActivity)
-            } else {
-                Timber.w("No launch activity found for %s — cannot launch", packageName)
-                return Result.failure(
-                    IllegalStateException("No launch activity for $packageName")
-                )
+            // Launch via VirtualStubActivity — it handles three strategies:
+            //  1. Direct launch (app already on device)
+            //  2. Shizuku install + am start (elevated, no dialog)
+            //  3. System package installer dialog
+            val stubIntent = android.content.Intent(ctx, VirtualStubActivity::class.java).apply {
+                putExtra(VirtualStubActivity.EXTRA_PACKAGE_NAME, packageName)
+                putExtra(VirtualStubActivity.EXTRA_ACTIVITY_CLASS, launchActivity)
+                putExtra(VirtualStubActivity.EXTRA_VIRTUAL_LAUNCH, true)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
             }
+            ctx.startActivity(stubIntent)
 
-            // Update app metadata with last launch time.
+            // Update last-launch time reactively.
             val updatedAppInfo = appInfo.copy(lastLaunchTime = System.currentTimeMillis())
             val updatedList = _installedApps.value
                 .filterNot { it.packageName == packageName } + updatedAppInfo
             _installedApps.value = updatedList
             persistAppRegistry()
 
-            Timber.i("Launched %s (virtualUid=%d, 64bit=%b)", packageName, virtualUid, is64Bit)
+            Timber.i("Launched %s via VirtualStubActivity → %s (uid=%d, 64bit=%b)",
+                packageName, launchActivity, virtualUid, is64Bit)
             Result.success(Unit)
         } catch (e: Exception) {
             Timber.e(e, "Failed to launch %s", packageName)

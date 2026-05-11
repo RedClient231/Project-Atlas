@@ -1,11 +1,8 @@
 package com.atlas.virtualspace
 
 import android.app.Application
-import android.content.Intent
-import android.net.Uri
 import android.os.Environment
 import android.os.Process
-import android.provider.Settings
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -15,6 +12,10 @@ import com.atlas.virtualspace.core.pm.VirtualPackageManager
 import com.atlas.virtualspace.data.database.AppDatabase
 import com.atlas.virtualspace.diagnostics.AtlasLogcatReporter
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.io.File
 import java.io.FileOutputStream
@@ -31,55 +32,69 @@ import java.util.Locale
  * - Annotated with `@HiltAndroidApp` for dependency injection.
  * - Initialises Timber logging (debug trees in debug builds, a
  *   conservative [ReleaseTree] in release builds).
- * - Registers a [ProcessLifecycleObserver] to initialise and shut down
- *   the [VirtualEngine] in lockstep with the app's process lifecycle.
+ * - Registers a [ProcessLifecycleObserver] to manage the [VirtualEngine]
+ *   lifecycle in lockstep with the app's process lifecycle.
  * - Installs an uncaught-exception handler that persists crash stacks
  *   to a local file for later diagnostics.
+ *
+ * ## Key Fix: DB init moved off the main thread
+ * Room database creation (and all subsequent core-component init) is
+ * dispatched on [Dispatchers.IO] via [appScope].  Previously this ran
+ * synchronously on the main thread inside [onCreate], which caused
+ * StrictMode violations and — worse — silently swallowed the
+ * "Cannot access database on the main thread" exception, leaving
+ * [VirtualPackageManager] permanently uninitialised and making every
+ * "Launch" tap a silent no-op.
  */
 @HiltAndroidApp
 class AtlasApplication : Application() {
 
-    // ─── Lifecycle Observer ──────────────────────────────────────
+    // ─── Application-scoped coroutine scope ──────────────────────────────
+    // Supervisor job so individual child failures do not cancel siblings.
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // ─── Lifecycle Observer ──────────────────────────────────────────────
 
     private val engineLifecycleObserver = object : DefaultLifecycleObserver {
         override fun onStart(owner: LifecycleOwner) {
-            // App came to foreground – no action needed; the service
-            // manages engine lifecycle.
+            // App came to foreground – engine is kept alive by the service.
         }
 
         override fun onStop(owner: LifecycleOwner) {
-            // App went to background – the engine keeps running via
-            // the foreground service.
+            // App went to background – engine keeps running via foreground service.
         }
     }
 
-    // ─── Application Lifecycle ───────────────────────────────────
+    // ─── Application Lifecycle ───────────────────────────────────────────
 
     override fun onCreate() {
         super.onCreate()
 
-        // 1. Install Timber logging.
+        // 1. Install Timber logging first so everything below can log.
         installTimber()
 
-        // 2. Initialize the logcat reporter FIRST so that any subsequent
-        //    errors or crashes are captured to internal storage.
+        // 2. Initialize logcat reporter so crashes are captured to storage.
         AtlasLogcatReporter.initialize(this)
 
-        // 3. Install uncaught-exception handler (uses AtlasLogcatReporter).
+        // 3. Install uncaught-exception handler.
         installCrashHandler()
 
-        // 4. Initialize core singletons BEFORE any feature tries to use them.
-        //    This prevents "lateinit property has not been initialized" crashes
-        //    when the user tries to install an APK before the engine service starts.
-        initializeCoreComponents()
+        // 4. Initialize core singletons ASYNCHRONOUSLY on the IO dispatcher.
+        //    CRITICAL FIX: Room DB creation MUST NOT run on the main thread.
+        //    Previously this was synchronous in onCreate(), causing the
+        //    "Cannot access database on the main thread" exception to be
+        //    swallowed, leaving VirtualPackageManager permanently uninitialised.
+        appScope.launch {
+            initializeCoreComponents()
+        }
 
         // 5. Register process lifecycle observer.
         ProcessLifecycleOwner.get().lifecycle.addObserver(engineLifecycleObserver)
 
-        Timber.i("AtlasApplication initialised")
+        Timber.i("AtlasApplication initialised — core init dispatched to IO thread")
     }
 
-    // ─── Timber Setup ────────────────────────────────────────────
+    // ─── Timber Setup ────────────────────────────────────────────────────
 
     private fun installTimber() {
         if (BuildConfig.DEBUG) {
@@ -89,232 +104,130 @@ class AtlasApplication : Application() {
         }
     }
 
-    // ─── Core Component Initialization ────────────────────────────
+    // ─── Core Component Initialization ───────────────────────────────────
 
     /**
-     * Initializes all core singletons that are required before any feature
-     * (install, launch, settings) can work.
+     * Initialises all core singletons on the IO dispatcher.
      *
-     * Previously these were only initialized when [VirtualEngineService]
-     * started, which caused crashes when the user tried to install an APK
-     * before the service was running.
-     *
-     * Now they are initialized eagerly in [onCreate] so that the app is
-     * always in a usable state.
+     * Order matters:
+     * 1. VirtualFileSystem  — required by VirtualPackageManager
+     * 2. AppDatabase        — required by VirtualPackageManager
+     * 3. VirtualPackageManager — required by VirtualEngine
+     * 4. VirtualEngineService  — starts VirtualEngine in its foreground service
+     * 5. Shizuku               — optional, non-fatal
      */
-    private fun initializeCoreComponents() {
+    private suspend fun initializeCoreComponents() {
         try {
-            // Initialize virtual filesystem first — many components depend on it.
+            // 1. Initialize virtual filesystem.
             val vfsResult = com.atlas.virtualspace.core.fs.VirtualFileSystem.initialize(this)
             if (vfsResult.isFailure) {
-                Timber.e(vfsResult.exceptionOrNull(), "VirtualFileSystem initialization failed in Application.onCreate")
+                Timber.e(vfsResult.exceptionOrNull(), "VirtualFileSystem initialization failed")
+                // Non-fatal: the app can still show the UI and attempt to recover.
             }
 
-            // Initialize Room database and VirtualPackageManager.
+            // 2. Create Room database ON THE IO THREAD.
+            //    This is the critical fix — Room throws "Cannot access database on
+            //    the main thread" if called on Main, which was silently caught
+            //    before, leaving VirtualPackageManager uninitialised.
             val database = AppDatabase.create(this)
+
+            // 3. Initialize VirtualPackageManager with the database.
             VirtualPackageManager.initialize(database)
             VirtualPackageManager.setContext(this)
 
-            // Start the virtual engine foreground service.
-            // This ensures the engine is initialized and ready before the user
-            // tries to launch any apps. The service keeps the engine alive
-            // even when the UI is in the background.
+            // 4. Start the virtual engine foreground service.
+            //    The service calls VirtualEngine.initialize() in onStartCommand.
             try {
                 com.atlas.virtualspace.core.engine.VirtualEngineService.start(this)
             } catch (e: Exception) {
-                Timber.w(e, "Failed to start VirtualEngineService — engine will start on first launch")
+                Timber.w(e, "Failed to start VirtualEngineService — will retry on first launch")
             }
 
-            // Initialize Shizuku integration (non-fatal — app works without Shizuku).
+            // 5. Initialize Shizuku (optional — app works without it).
             val shizukuResult = ShizukuIntegration.initialize(this)
             if (shizukuResult.isFailure) {
-                Timber.w(shizukuResult.exceptionOrNull(), "Shizuku integration not available")
+                Timber.w(shizukuResult.exceptionOrNull(), "Shizuku not available")
             }
 
-            // Request MANAGE_EXTERNAL_STORAGE permission for writing to Downloads.
-            // This is required on Android 11+ (API 30+) to write to public directories.
-            requestStoragePermission()
-
-            Timber.i("Core components initialized: VFS=%s, Shizuku=%s",
-                vfsResult.isSuccess, shizukuResult.isSuccess)
+            Timber.i(
+                "Core components initialized: VFS=%b, DB=OK, Shizuku=%b",
+                vfsResult.isSuccess,
+                shizukuResult.isSuccess,
+            )
         } catch (e: Exception) {
-            Timber.e(e, "Critical error during core component initialization")
+            Timber.e(e, "Critical error during async core component initialization")
         }
     }
 
-    /**
-     * Requests MANAGE_EXTERNAL_STORAGE permission on Android 11+.
-     * This is required for writing logcat files and crash reports
-     * to the public Downloads directory.
-     *
-     * Without this permission, the app falls back to app-specific
-     * directories which are hidden from the user.
-     */
-    private fun requestStoragePermission() {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            if (!Environment.isExternalStorageManager()) {
-                Timber.w("MANAGE_EXTERNAL_STORAGE not granted — log files may not be visible in Downloads")
-                // Don't auto-launch the settings screen — it's too disruptive on startup.
-                // The Settings screen has a button to grant this permission.
-                // The logcat export will try to use the Downloads directory anyway,
-                // and if MANAGE_EXTERNAL_STORAGE is granted later, it will work.
-            } else {
-                Timber.i("MANAGE_EXTERNAL_STORAGE permission granted")
-            }
-        }
-    }
+    // ─── Engine State ────────────────────────────────────────────────────
 
-    // ─── Engine State ────────────────────────────────────────────
-
-    /**
-     * Returns `true` if the virtual engine is currently initialised and running.
-     */
     fun isEngineRunning(): Boolean = VirtualEngine.isRunning.value
 
-    // ─── Crash Handler ───────────────────────────────────────────
+    // ─── Crash Handler ───────────────────────────────────────────────────
 
     private val crashLogDir by lazy {
-        // Use public Downloads directory so crash logs are visible to the user.
-        // Path: /storage/emulated/0/Download/AtlasReports/crash_logs/
-        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "AtlasReports/crash_logs").also { dir ->
-            if (!dir.exists()) dir.mkdirs()
-        }
+        File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            "AtlasReports/crash_logs"
+        ).also { dir -> if (!dir.exists()) dir.mkdirs() }
     }
 
-    /**
-     * Installs a custom [Thread.UncaughtExceptionHandler] that persists
-     * the full stack trace to a timestamped file under `crash_logs/`
-     * before delegating to the original handler (which typically kills
-     * the process).
-     */
     private fun installCrashHandler() {
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            try {
-                persistCrashLog(thread, throwable)
-            } catch (e: Exception) {
-                // If we can't write the crash log there's nothing we can do.
-            }
-
-            // Also write to the diagnostics reporter (internal storage)
-            try {
-                AtlasLogcatReporter.reportCrash(thread, throwable)
-            } catch (_: Exception) {
-                // Best effort
-            }
-
-            // Delegate to the original handler so the process still terminates
-            // with the standard dialog / reporting flow.
+            try { persistCrashLog(thread, throwable) } catch (_: Exception) {}
+            try { AtlasLogcatReporter.reportCrash(thread, throwable) } catch (_: Exception) {}
             defaultHandler?.uncaughtException(thread, throwable)
         }
     }
 
-    /**
-     * Writes the crash stack trace to a file named `crash_<timestamp>.log`.
-     *
-     * Each log entry includes:
-     * - Timestamp
-     * - Thread name
-     * - Full stack trace
-     * - Device / build info
-     */
     private fun persistCrashLog(thread: Thread, throwable: Throwable) {
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val logFile = File(crashLogDir, "crash_$timestamp.log")
 
-        val stringWriter = StringWriter()
-        val printWriter = PrintWriter(stringWriter)
-
-        printWriter.println("=== Atlas Crash Log ===")
-        printWriter.println("Timestamp : $timestamp")
-        printWriter.println("Thread    : ${thread.name} (id=${thread.id})")
-        printWriter.println("PID       : ${Process.myPid()}")
-        printWriter.println("Device    : ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
-        printWriter.println("Android   : ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})")
-        printWriter.println("App       : ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-        printWriter.println()
-
-        throwable.printStackTrace(printWriter)
-
-        // Also include any suppressed exceptions.
-        throwable.suppressed?.forEach { suppressed ->
-            printWriter.println("Suppressed:")
-            suppressed.printStackTrace(printWriter)
-        }
-
-        // Walk the cause chain.
+        val sw = StringWriter()
+        val pw = PrintWriter(sw)
+        pw.println("=== Atlas Crash Log ===")
+        pw.println("Timestamp : $timestamp")
+        pw.println("Thread    : ${thread.name} (id=${thread.id})")
+        pw.println("PID       : ${Process.myPid()}")
+        pw.println("Device    : ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+        pw.println("Android   : ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})")
+        pw.println("App       : ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+        pw.println()
+        throwable.printStackTrace(pw)
+        throwable.suppressed?.forEach { s -> pw.println("Suppressed:"); s.printStackTrace(pw) }
         var cause = throwable.cause
-        while (cause != null) {
-            printWriter.println("Caused by:")
-            cause.printStackTrace(printWriter)
-            cause = cause.cause
-        }
+        while (cause != null) { pw.println("Caused by:"); cause.printStackTrace(pw); cause = cause.cause }
+        pw.flush()
 
-        printWriter.flush()
-
-        FileOutputStream(logFile).use { output ->
-            output.write(stringWriter.toString().toByteArray(Charsets.UTF_8))
-        }
-
-        // Prune old crash logs (keep at most MAX_CRASH_LOGS).
+        FileOutputStream(logFile).use { it.write(sw.toString().toByteArray(Charsets.UTF_8)) }
         pruneCrashLogs()
     }
 
-    /**
-     * Removes the oldest crash log files if the count exceeds [MAX_CRASH_LOGS].
-     */
     private fun pruneCrashLogs() {
         val logs = crashLogDir.listFiles()
             ?.filter { it.name.startsWith("crash_") && it.name.endsWith(".log") }
-            ?.sortedBy { it.lastModified() }
-            ?: return
-
+            ?.sortedBy { it.lastModified() } ?: return
         if (logs.size > MAX_CRASH_LOGS) {
-            val toDelete = logs.take(logs.size - MAX_CRASH_LOGS)
-            toDelete.forEach { file ->
-                if (!file.delete()) {
-                    Timber.w("Failed to delete old crash log: %s", file.name)
-                }
-            }
+            logs.take(logs.size - MAX_CRASH_LOGS).forEach { it.delete() }
         }
     }
 
-    // ─── Release Tree ────────────────────────────────────────────
+    // ─── Release Tree ────────────────────────────────────────────────────
 
-    /**
-     * A conservative Timber tree for release builds.
-     *
-     * Only logs **ERROR** and **WTF** (What a Terrible Failure) priorities
-     * to avoid leaking sensitive information in production logs.  All other
-     * priority levels are silently dropped.
-     */
     private class ReleaseTree : Timber.Tree() {
-
-        override fun isLoggable(tag: String?, priority: Int): Boolean {
-            return priority >= android.util.Log.ERROR
-        }
+        override fun isLoggable(tag: String?, priority: Int) = priority >= android.util.Log.ERROR
 
         override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
             if (!isLoggable(tag, priority)) return
-
-            // In release builds we still write to the system log so that
-            // bug-report captures include the critical messages.
-            // We do NOT use Log.v / Log.d / Log.i.
             when (priority) {
-                android.util.Log.ERROR -> {
-                    if (t != null) {
-                        android.util.Log.e(tag, message, t)
-                    } else {
-                        android.util.Log.e(tag, message)
-                    }
-                }
-                android.util.Log.ASSERT -> {
-                    if (t != null) {
-                        android.util.Log.wtf(tag, message, t)
-                    } else {
-                        android.util.Log.wtf(tag, message)
-                    }
-                }
+                android.util.Log.ERROR ->
+                    if (t != null) android.util.Log.e(tag, message, t)
+                    else android.util.Log.e(tag, message)
+                android.util.Log.ASSERT ->
+                    if (t != null) android.util.Log.wtf(tag, message, t)
+                    else android.util.Log.wtf(tag, message)
             }
         }
     }

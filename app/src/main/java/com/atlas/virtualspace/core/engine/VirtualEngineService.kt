@@ -92,6 +92,20 @@ class VirtualEngineService : LifecycleService() {
             return START_NOT_STICKY
         }
 
+        // Post foreground notification BEFORE initialising the engine.
+        // On Android 13+ (API 33), startForeground() must be called within
+        // a few seconds of startForegroundService() or the system kills the
+        // service. We call it unconditionally here; if POST_NOTIFICATIONS is
+        // not granted the notification is simply not shown but the service
+        // keeps running (the permission is for the user-visible notification,
+        // not for the service itself).
+        try {
+            val notification = buildForegroundNotification()
+            startForeground(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to post foreground notification — service continues without it")
+        }
+
         // Initialise the engine if this is the first start.
         if (!VirtualEngine.isRunning.value) {
             val result = VirtualEngine.initialize(applicationContext)
@@ -101,10 +115,6 @@ class VirtualEngineService : LifecycleService() {
                 return START_NOT_STICKY
             }
         }
-
-        // Post foreground notification immediately.
-        val notification = buildForegroundNotification()
-        startForeground(NOTIFICATION_ID, notification)
 
         // Start periodic state refresh.
         startPeriodicRefresh()

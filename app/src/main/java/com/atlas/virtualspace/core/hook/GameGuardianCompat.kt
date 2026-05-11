@@ -309,71 +309,84 @@ object GameGuardianCompat {
      * Hooks `FileInputStream` reads targeting `/proc/self/maps` to
      * return the virtual process memory map instead.
      *
-     * GG reads `/proc/self/maps` to enumerate memory regions. In a
-     * virtual process, this would show the host's memory map. We
-     * intercept the read and return a virtualized map with readable
-     * regions corresponding to the virtual app's memory layout.
+     * FIXED: The previous implementation set `frame.args[0] = null` on the
+     * FileInputStream(String) constructor hook, which caused an immediate
+     * NullPointerException in the constructor body when the real constructor
+     * tried to use the null path string. This crashed whatever code was
+     * trying to open /proc/self/maps.
+     *
+     * The correct approach is to use an afterHook on the read() methods and
+     * short-circuit the result only when the FileInputStream path is
+     * /proc/self/maps. We track opened paths using a thread-local so we can
+     * correlate the constructor call with subsequent reads.
      *
      * @return [Result.success] with the hook ID, or [Result.failure].
      */
     private fun hookProcSelfMaps(): Result<String> {
-        // Hook the FileInputStream constructor that takes a String path.
-        // When the path is /proc/self/maps, we replace the stream content.
-        val result = HookManager.hookMethod(
+        // Track which FileInputStream instances were opened for /proc/self/maps.
+        // We use a WeakHashMap so GC'd streams don't leak memory.
+        val trackedStreams = java.util.Collections.synchronizedMap(
+            java.util.WeakHashMap<Any, Boolean>()
+        )
+
+        // Hook FileInputStream(String) constructor — ONLY to mark the stream,
+        // NOT to null out the path (which caused the NPE).
+        val ctorResult = HookManager.hookMethod(
             className = "java.io.FileInputStream",
             methodName = "<init>",
             paramTypes = arrayOf(String::class.java),
-            beforeHook = { frame ->
-                val path = frame.args[0] as? String ?: return@hookMethod
+            beforeHook = null,
+            afterHook = { frame ->
+                val path = frame.args?.getOrNull(0) as? String ?: return@hookMethod
                 if (path == "/proc/self/maps") {
-                    Log.d(TAG, "Intercepted FileInputStream(/proc/self/maps)")
-                    val virtualMaps = getVirtualProcessMemoryMap(Process.myPid())
-                    // Replace the file input stream with one that reads from our virtual maps
-                    frame.args[0] = null // We can't change the file, so we hook the read instead
+                    // Mark this FileInputStream instance as a maps stream.
+                    frame.thisObject?.let { trackedStreams[it] = true }
+                    Log.d(TAG, "Marked FileInputStream for /proc/self/maps interception")
                 }
-            },
-            afterHook = null
+            }
         )
 
-        if (result.isFailure) {
-            // Fallback: hook the read method instead
-            val readResult = HookManager.hookAllMethods(
-                className = "java.io.FileInputStream",
-                methodName = "read",
-                beforeHook = null,
-                afterHook = { frame ->
-                    // Check if this FileInputStream is for /proc/self/maps
-                    val fis = frame.thisObject as? FileInputStream ?: return@hookAllMethods
-                    try {
-                        val fdField = FileInputStream::class.java.getDeclaredField("path")
-                        fdField.isAccessible = true
-                        val path = fdField.get(fis) as? String
-                        if (path == "/proc/self/maps") {
-                            val virtualMaps = getVirtualProcessMemoryMap(Process.myPid())
-                            frame.result = virtualMaps.toByteArray(Charsets.UTF_8)
-                            Log.d(TAG, "Replaced /proc/self/maps read with virtual map")
-                        }
-                    } catch (_: NoSuchFieldException) {
-                        // Path field not available on this Android version — skip
-                    }
-                }
-            )
-
-            if (readResult.isSuccess) {
-                installedHookIds.addAll(readResult.getOrDefault(emptyList()))
-                Log.d(TAG, "hookProcSelfMaps (read fallback) installed")
-                return Result.success("gg_compat_proc_maps_read")
-            }
-
-            return Result.failure(
-                result.exceptionOrNull()
-                    ?: RuntimeException("Failed to hook /proc/self/maps")
-            )
+        if (ctorResult.isSuccess) {
+            installedHookIds.add(ctorResult.getOrThrow())
         }
 
-        installedHookIds.add(result.getOrThrow())
-        Log.d(TAG, "hookProcSelfMaps installed: ${result.getOrThrow()}")
-        return Result.success(result.getOrThrow())
+        // Hook FileInputStream.read(byte[], int, int) — the main read method.
+        // If the stream was opened for /proc/self/maps, replace the output
+        // with our virtual maps content.
+        val readResult = HookManager.hookMethod(
+            className = "java.io.FileInputStream",
+            methodName = "read",
+            paramTypes = arrayOf(ByteArray::class.java, Int::class.java, Int::class.java),
+            beforeHook = null,
+            afterHook = { frame ->
+                val fis = frame.thisObject ?: return@hookMethod
+                if (trackedStreams[fis] != true) return@hookMethod
+
+                val virtualMaps = getVirtualProcessMemoryMap(Process.myPid())
+                val bytes = virtualMaps.toByteArray(Charsets.UTF_8)
+                val buf = frame.args?.getOrNull(0) as? ByteArray ?: return@hookMethod
+                val offset = frame.args?.getOrNull(1) as? Int ?: 0
+                val len = minOf(frame.args?.getOrNull(2) as? Int ?: bytes.size, bytes.size, buf.size - offset)
+                if (len > 0) {
+                    System.arraycopy(bytes, 0, buf, offset, len)
+                    frame.result = len
+                    Log.d(TAG, "Replaced /proc/self/maps read with virtual map ($len bytes)")
+                } else {
+                    frame.result = -1 // EOF
+                }
+                // Remove tracking after first read to avoid repeated substitution
+                trackedStreams.remove(fis)
+            }
+        )
+
+        return if (readResult.isSuccess) {
+            installedHookIds.add(readResult.getOrThrow())
+            Log.d(TAG, "hookProcSelfMaps installed successfully")
+            Result.success("gg_compat_proc_maps")
+        } else {
+            Log.e(TAG, "Failed to hook FileInputStream.read for /proc/self/maps")
+            Result.failure(readResult.exceptionOrNull() ?: RuntimeException("hookProcSelfMaps failed"))
+        }
     }
 
     /**

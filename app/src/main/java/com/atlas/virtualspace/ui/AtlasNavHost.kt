@@ -218,10 +218,14 @@ fun AtlasNavHost(
                 ),
             ) { backStackEntry ->
                 val packageName = backStackEntry.arguments?.getString("packageName").orEmpty()
-                HomeScreen( // Reuse home's app-detail view inside a standalone route
+                // FIXED: Pass the scaffold's shared snackbarHostState so launch errors
+                // are visible. Previously a new instance was created here (the default),
+                // so snackbars were posted to an un-displayed host and silently dropped.
+                HomeScreen(
                     onNavigateToInstall = { navController.navigate(AtlasRoutes.INSTALL) },
                     onNavigateToAppDetail = { navController.navigate(AtlasRoutes.appDetail(it)) },
                     highlightPackage = packageName,
+                    snackbarHostState = snackbarHostState,
                 )
             }
         }

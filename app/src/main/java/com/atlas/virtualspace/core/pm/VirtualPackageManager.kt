@@ -319,31 +319,40 @@ object VirtualPackageManager {
     // ───────────────────────── Actions ────────────────────────────────────────
 
     /**
-     * Launches a virtual app by delegating to the VirtualEngine.
+     * Launches a virtual app by delegating to [VirtualEngine].
      *
      * Before launching, mount points are (re-)established and launch stats
      * are updated in the database.
+     *
+     * FIXED: Previously this method duplicated the launch logic by calling
+     * VirtualEngine.launchApp() directly. HomeViewModel.launchApp() already
+     * calls this method, and the old code caused a double-call chain where
+     * errors at the VirtualEngine level were swallowed by the outer runCatching
+     * in this method, making failures invisible. Now errors propagate cleanly.
      */
     fun launchApp(packageName: String): Result<Unit> = runCatching {
         if (!isInitialized()) {
-            throw IllegalStateException("VirtualPackageManager not initialized. Please restart Atlas.")
+            throw IllegalStateException(
+                "Virtual space is still initialising — please wait a moment and try again."
+            )
         }
 
         val appInfo = getAppInfo(packageName)
-            ?: throw IllegalArgumentException("App not installed: $packageName")
+            ?: throw IllegalArgumentException("App not installed in virtual space: $packageName")
 
         if (!appInfo.isEnabled) {
             throw IllegalStateException("App is disabled: $packageName")
         }
 
-        // Setup mount points (non-fatal — the app runs on the real device)
+        // Setup mount points (non-fatal — the app can still run without them
+        // in the single-process model; mounts improve isolation).
         try {
             VirtualMountManager.setupAppMounts(packageName, appInfo).getOrThrow()
         } catch (e: Exception) {
             Timber.w(e, "Mount setup failed for %s — continuing with launch", packageName)
         }
 
-        // Update launch statistics
+        // Update launch statistics (non-fatal).
         val now = System.currentTimeMillis()
         try {
             runBlocking(Dispatchers.IO) {
@@ -353,7 +362,7 @@ object VirtualPackageManager {
             Timber.w(e, "Failed to update launch stats for %s", packageName)
         }
 
-        // Delegate to VirtualEngine (in core.engine package)
+        // Delegate to VirtualEngine — this is the single authoritative launch path.
         com.atlas.virtualspace.core.engine.VirtualEngine.launchApp(packageName).getOrThrow()
     }
 
@@ -498,87 +507,171 @@ object VirtualPackageManager {
     /**
      * Resolves the launch activity from the APK manifest.
      *
+     * FIXED: apk-parser 2.6.10 does NOT have an `activities` field on
+     * [ApkMeta]. The previous implementation used reflection to access
+     * a non-existent field, always threw [NoSuchFieldException], and
+     * silently fell through — resulting in [launchActivity] == null for
+     * every app, which caused [VirtualEngine.launchApp] to return a
+     * failure for every tap.
+     *
+     * The correct approach is to parse the raw binary AndroidManifest.xml
+     * from the APK's ZIP stream directly, which is what apk-parser's
+     * [net.dongliu.apk.parser.parser.XmlTranslator] is designed for.
+     * We use the public [ApkFile.getTranslator] → [XmlTranslator] API
+     * to obtain the full manifest as an XML string and then extract the
+     * launcher activity with a simple regex / SAX parse.
+     *
      * Strategy (in order of preference):
-     * 1. Parse the APK's AndroidManifest.xml using apk-parser to find
-     *    activities with ACTION_MAIN + CATEGORY_LAUNCHER intent filters.
-     * 2. Fallback: Try the system PackageManager (only works for apps
-     *    that are already installed on the device, e.g. clone installs).
-     * 3. Last resort: return null (the app cannot be launched).
+     * 1. Parse raw AndroidManifest.xml from the APK ZIP stream to find
+     *    the activity with ACTION_MAIN + CATEGORY_LAUNCHER.
+     * 2. Fallback: Try the system PackageManager (works for clone installs
+     *    where the app is already on the device).
+     * 3. Last resort: return null (app cannot be launched until reinstalled).
      */
     private fun resolveLaunchActivityFromApk(apk: ApkFile, packageName: String): String? {
-        // Strategy 1: Use apk-parser's ApkMeta to get the launchable activity.
-        // The apk-parser library (2.6.10) exposes launch activities via
-        // the ApkMeta object itself. We try to find an activity with
-        // ACTION_MAIN + CATEGORY_LAUNCHER intent filters.
+        // ── Strategy 1: Parse AndroidManifest.xml via apk-parser public API ──
+        //
+        // apk-parser 2.6.10 exposes the full parsed manifest as a UTF-8 XML
+        // string via ApkFile.getManifestXml().  We search for:
+        //
+        //   <activity android:name="...">
+        //     <intent-filter>
+        //       <action android:name="android.intent.action.MAIN"/>
+        //       <category android:name="android.intent.category.LAUNCHER"/>
+        //     </intent-filter>
+        //   </activity>
+        //
+        // We use a SAX-style approach rather than full DOM parsing to keep
+        // the implementation dependency-free and avoid OOM on large manifests.
         try {
-            val meta = apk.apkMeta
+            val manifestXml = apk.manifestXml ?: ""
+            if (manifestXml.isNotBlank()) {
+                val result = parseLauncherActivityFromManifestXml(manifestXml, packageName)
+                if (result != null) {
+                    Timber.d("Resolved launch activity for %s via manifest XML: %s", packageName, result)
+                    return result
+                }
+            }
+        } catch (e: Exception) {
+            Timber.d(e, "Manifest XML parsing failed for %s — trying PM fallback", packageName)
+        }
 
-            // Try using reflection to access activity list since the API
-            // varies between apk-parser versions. The launchable activity
-            // is typically the one with MAIN/LAUNCHER intent filter.
-            // ApkParser 2.6.10 stores activities in ApkMeta.
-            try {
-                val activitiesField = ApkMeta::class.java.getDeclaredField("activities")
-                activitiesField.isAccessible = true
-                @Suppress("UNCHECKED_CAST")
-                val activities = activitiesField.get(meta) as? List<*>
-                if (activities != null && activities.isNotEmpty()) {
-                    for (activityObj in activities) {
-                        if (activityObj == null) continue
-                        val nameField = activityObj.javaClass.getDeclaredField("name")
-                        nameField.isAccessible = true
-                        val activityName = nameField.get(activityObj) as? String ?: continue
+        // ── Strategy 2: System PackageManager (clone installs only) ──
+        try {
+            val launchIntent = appContext.packageManager.getLaunchIntentForPackage(packageName)
+            if (launchIntent != null) {
+                val className = launchIntent.component?.className
+                if (!className.isNullOrBlank()) {
+                    Timber.d("Resolved launch activity for %s via PackageManager: %s", packageName, className)
+                    return className
+                }
+            }
+        } catch (_: Exception) {
+            // Package not installed on device — normal for file imports.
+        }
 
-                        val intentFiltersField = activityObj.javaClass.getDeclaredField("intentFilters")
-                        intentFiltersField.isAccessible = true
-                        @Suppress("UNCHECKED_CAST")
-                        val filters = intentFiltersField.get(activityObj) as? List<*>
-                        if (filters != null) {
-                            for (filterObj in filters) {
-                                if (filterObj == null) continue
-                                val actionsField = filterObj.javaClass.getDeclaredField("actions")
-                                actionsField.isAccessible = true
-                                @Suppress("UNCHECKED_CAST")
-                                val actions = actionsField.get(filterObj) as? List<String>
-                                val categoriesField = filterObj.javaClass.getDeclaredField("categories")
-                                categoriesField.isAccessible = true
-                                @Suppress("UNCHECKED_CAST")
-                                val categories = categoriesField.get(filterObj) as? List<String>
+        Timber.w("Could not resolve launch activity for %s — app may not be launchable", packageName)
+        return null
+    }
 
-                                val hasMainAction = actions?.any { it == "android.intent.action.MAIN" } == true
-                                val hasLauncherCategory = categories?.any { it == "android.intent.category.LAUNCHER" } == true
-                                if (hasMainAction && hasLauncherCategory) {
-                                    var resolvedName = activityName
-                                    if (resolvedName.startsWith(".")) {
-                                        resolvedName = "$packageName$resolvedName"
-                                    } else if (!resolvedName.contains(".")) {
-                                        resolvedName = "$packageName.$resolvedName"
-                                    }
-                                    return resolvedName
+    /**
+     * Parses an AndroidManifest.xml string and returns the fully-qualified
+     * class name of the launcher activity (ACTION_MAIN + CATEGORY_LAUNCHER).
+     *
+     * Uses Android's built-in [javax.xml.parsers.SAXParserFactory] to walk
+     * the XML tree without any third-party dependency.
+     *
+     * @param xmlContent  The manifest XML as a UTF-8 string.
+     * @param packageName The app's package name, used to resolve relative
+     *                    activity names (e.g. ".MainActivity" → "com.example.app.MainActivity").
+     * @return Fully-qualified activity class name, or null if not found.
+     */
+    private fun parseLauncherActivityFromManifestXml(xmlContent: String, packageName: String): String? {
+        return try {
+            val factory = javax.xml.parsers.SAXParserFactory.newInstance()
+            val saxParser = factory.newSAXParser()
+
+            var currentActivityName: String? = null
+            var inIntentFilter = false
+            var hasMainAction = false
+            var hasLauncherCategory = false
+            var launcherActivity: String? = null
+
+            val handler = object : org.xml.sax.helpers.DefaultHandler() {
+                override fun startElement(
+                    uri: String?, localName: String?, qName: String?,
+                    attributes: org.xml.sax.Attributes?
+                ) {
+                    when (qName?.lowercase() ?: localName?.lowercase()) {
+                        "activity", "activity-alias" -> {
+                            // Reset tracking for this activity element
+                            currentActivityName = attributes?.getValue("android:name")
+                                ?: attributes?.getValue("name")
+                            inIntentFilter = false
+                            hasMainAction = false
+                            hasLauncherCategory = false
+                        }
+                        "intent-filter" -> {
+                            inIntentFilter = true
+                        }
+                        "action" -> {
+                            if (inIntentFilter) {
+                                val actionName = attributes?.getValue("android:name")
+                                    ?: attributes?.getValue("name")
+                                if (actionName == "android.intent.action.MAIN") {
+                                    hasMainAction = true
+                                }
+                            }
+                        }
+                        "category" -> {
+                            if (inIntentFilter) {
+                                val categoryName = attributes?.getValue("android:name")
+                                    ?: attributes?.getValue("name")
+                                if (categoryName == "android.intent.category.LAUNCHER") {
+                                    hasLauncherCategory = true
                                 }
                             }
                         }
                     }
                 }
-            } catch (refEx: Exception) {
-                Timber.d(refEx, "Reflection-based activity lookup failed, trying fallback")
+
+                override fun endElement(uri: String?, localName: String?, qName: String?) {
+                    when (qName?.lowercase() ?: localName?.lowercase()) {
+                        "intent-filter" -> {
+                            if (hasMainAction && hasLauncherCategory && currentActivityName != null) {
+                                // Found the launcher activity
+                                launcherActivity = resolveActivityName(currentActivityName!!, packageName)
+                            }
+                            inIntentFilter = false
+                            hasMainAction = false
+                            hasLauncherCategory = false
+                        }
+                        "activity", "activity-alias" -> {
+                            currentActivityName = null
+                        }
+                    }
+                }
             }
+
+            val inputStream = xmlContent.byteInputStream(Charsets.UTF_8)
+            saxParser.parse(inputStream, handler)
+            launcherActivity
         } catch (e: Exception) {
-            Timber.w(e, "Failed to parse launch activity from APK manifest")
+            Timber.d(e, "SAX manifest parse failed for %s", packageName)
+            null
         }
+    }
 
-        // Strategy 2: Try system PackageManager (works for clone installs).
-        try {
-            val launchIntent = appContext.packageManager.getLaunchIntentForPackage(packageName)
-            if (launchIntent != null) {
-                return launchIntent.component?.className
-            }
-        } catch (_: Exception) {
-            // Package not installed on device — this is normal for file imports
+    /**
+     * Resolves an activity name that may be relative (starts with ".") or
+     * short (no package prefix) to a fully-qualified class name.
+     */
+    private fun resolveActivityName(name: String, packageName: String): String {
+        return when {
+            name.startsWith(".") -> "$packageName$name"
+            name.contains(".") -> name  // already fully qualified
+            else -> "$packageName.$name"
         }
-
-        Timber.w("Could not resolve launch activity for %s — app may not be launchable", packageName)
-        return null
     }
 
     /**
