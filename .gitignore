@@ -19,6 +19,9 @@ out/
 build/
 */build/
 
+# CMake build artifacts
+app/.cxx/
+
 # Local configuration file
 local.properties
 
