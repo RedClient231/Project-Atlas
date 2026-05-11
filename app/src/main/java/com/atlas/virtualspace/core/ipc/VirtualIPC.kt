@@ -133,11 +133,11 @@ class VirtualIPC : Binder() {
                 .getOrDefault(Bundle.EMPTY)
 
             val result = when (code) {
-                TRANSACTION_INSTALL -> handleInstall(requestData)
-                TRANSACTION_LAUNCH -> handleLaunch(requestData)
-                TRANSACTION_FORCE_STOP -> handleForceStop(requestData)
-                TRANSACTION_GET_PROCESS_INFO -> handleGetProcessInfo(requestData)
-                TRANSACTION_SYNC_DATA -> handleSyncData(requestData)
+                TRANSACTION_INSTALL -> handleInstall(requestData ?: Bundle.EMPTY)
+                TRANSACTION_LAUNCH -> handleLaunch(requestData ?: Bundle.EMPTY)
+                TRANSACTION_FORCE_STOP -> handleForceStop(requestData ?: Bundle.EMPTY)
+                TRANSACTION_GET_PROCESS_INFO -> handleGetProcessInfo(requestData ?: Bundle.EMPTY)
+                TRANSACTION_SYNC_DATA -> handleSyncData(requestData ?: Bundle.EMPTY)
                 else -> IpcResult.error("Unknown transaction code: $code")
             }
 
@@ -149,7 +149,7 @@ class VirtualIPC : Binder() {
 
             reply?.writeNoException()
             reply?.writeInt(if (result.success) 0 else 1)
-            reply?.writeBundle(result.data)
+            reply?.writeBundle(result.data ?: Bundle.EMPTY)
             if (!result.success) {
                 reply?.writeString(result.error)
             }
@@ -390,6 +390,7 @@ class VirtualIPC : Binder() {
             val list = callbacks.getOrPut(packageName) { CopyOnWriteArrayList() }
             list.add(entry)
             Log.d(TAG, "Callback registered for $packageName (total=${list.size})")
+            Unit
         }
     }
 
@@ -404,6 +405,7 @@ class VirtualIPC : Binder() {
             val removed = callbacks.remove(packageName)
             val count = removed?.size ?: 0
             Log.d(TAG, "Callbacks unregistered for $packageName ($count removed)")
+            Unit
         }
     }
 

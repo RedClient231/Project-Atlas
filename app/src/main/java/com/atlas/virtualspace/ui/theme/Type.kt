@@ -2,26 +2,15 @@ package com.atlas.virtualspace.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
-import com.atlas.virtualspace.R
 
 // ─── Custom font family (falls back to system sans-serif) ─────────────────────
 
-val AtlasFontFamily = FontFamily(
-    Font(R.font.atlas_regular, FontWeight.Normal),
-    Font(R.font.atlas_medium, FontWeight.Medium),
-    Font(R.font.atlas_semibold, FontWeight.SemiBold),
-    Font(R.font.atlas_bold, FontWeight.Bold),
-    Font(R.font.atlas_light, FontWeight.Light),
-)
+val AtlasFontFamily = FontFamily.Default
 
-val AtlasMonoFamily = FontFamily(
-    Font(R.font.atlas_mono_regular, FontWeight.Normal),
-    Font(R.font.atlas_mono_bold, FontWeight.Bold),
-)
+val AtlasMonoFamily = FontFamily.Monospace
 
 // ─── Material 3 Typography scale ─────────────────────────────────────────────
 

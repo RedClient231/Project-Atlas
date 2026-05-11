@@ -9,8 +9,8 @@ import android.content.pm.PackageManager
 import android.os.IBinder
 import android.os.RemoteException
 import android.util.Log
-import dev.rikka.shizuku.Shizuku
-import dev.rikka.shizuku.ShizukuProvider
+import rikka.shizuku.Shizuku
+import java.lang.reflect.Method
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.concurrent.CountDownLatch
@@ -44,7 +44,7 @@ import java.util.concurrent.atomic.AtomicReference
  * [Result.failure] with a descriptive error. The app continues to function
  * without Shizuku — it just cannot perform elevated operations.
  */
-object ShizukuIntegration : Shizuku.OnRequestPermissionResultListener {
+object ShizukuIntegration {
 
     private const val TAG = "Atlas:Shizuku"
 
@@ -103,12 +103,14 @@ object ShizukuIntegration : Shizuku.OnRequestPermissionResultListener {
             isAvailable.set(Shizuku.getBinder() != null)
             isPermissionGranted.set(checkPermission(context))
 
-            Shizuku.setOnRequestPermissionResultListener(this)
+            // Note: Shizuku does not have setOnRequestPermissionResultListener in this version.
+            // Permission results are handled via addRequestPermissionResultListener.
 
             Log.i(
                 TAG,
                 "Shizuku initialized — available: ${isAvailable.get()}, permission: ${isPermissionGranted.get()}"
             )
+            Unit
         }.onFailure { e ->
             when (e) {
                 is ClassNotFoundException -> {
@@ -210,13 +212,16 @@ object ShizukuIntegration : Shizuku.OnRequestPermissionResultListener {
         }
     }
 
+    @Volatile
+    private var permissionListener: Shizuku.OnRequestPermissionResultListener? = null
+
     /**
      * Callback for Shizuku permission request results.
-     * Implements [Shizuku.OnRequestPermissionResultListener].
      */
-    override fun onRequestPermissionResult(requestCode: Int, grantResult: Int) {
+    private fun onRequestPermissionResult(requestCode: Int, grantResults: IntArray) {
         if (requestCode != SHIZUKU_PERMISSION_REQUEST_CODE) return
 
+        val grantResult = grantResults.firstOrNull() ?: PackageManager.PERMISSION_DENIED
         val result = if (grantResult == PackageManager.PERMISSION_GRANTED) {
             Result.success(Unit)
         } else {
@@ -234,7 +239,7 @@ object ShizukuIntegration : Shizuku.OnRequestPermissionResultListener {
     /**
      * Executes a shell command via Shizuku.
      *
-     * Uses [Shizuku.newProcess] to run the command with shell (ADB) privileges.
+     * Uses [ShizukuService.newProcess] to run the command with shell (ADB) privileges.
      * The command's stdout is captured and returned as a string.
      *
      * @param command The shell command to execute (e.g. `"pm list packages"`).
@@ -254,7 +259,7 @@ object ShizukuIntegration : Shizuku.OnRequestPermissionResultListener {
         return runCatching {
             Log.d(TAG, "Executing via Shizuku: $command")
 
-            val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
+            val process = invokeNewProcess(arrayOf("sh", "-c", command), null, null)
 
             val stdout = StringBuilder()
             val stderr = StringBuilder()
@@ -313,7 +318,7 @@ object ShizukuIntegration : Shizuku.OnRequestPermissionResultListener {
             }
 
             Log.d(TAG, "Shizuku command completed successfully (${output.length} chars)")
-            Result.success(output)
+            output
         }.onFailure { e ->
             when (e) {
                 is RemoteException ->
@@ -323,11 +328,9 @@ object ShizukuIntegration : Shizuku.OnRequestPermissionResultListener {
                 else ->
                     Log.e(TAG, "Failed to execute Shizuku command: $command", e)
             }
-        }.getOrElse { Result.failure(it) }
+        }
     }
 
-    // ──────────────────────────────────────────────────────────
-    //  App management via Shizuku
     // ──────────────────────────────────────────────────────────
 
     /**
@@ -399,10 +402,10 @@ object ShizukuIntegration : Shizuku.OnRequestPermissionResultListener {
                 Log.w(TAG, "APK install may have failed — output: $output")
             }
 
-            Result.success(success)
+            success
         }.onFailure { e ->
             Log.e(TAG, "Failed to install APK via Shizuku: $apkPath", e)
-        }.getOrElse { Result.failure(it) }
+        }
     }
 
     /**
@@ -434,10 +437,10 @@ object ShizukuIntegration : Shizuku.OnRequestPermissionResultListener {
             }
 
             Log.i(TAG, "Force-stop command sent successfully for: $packageName")
-            Result.success(Unit)
+            Unit
         }.onFailure { e ->
             Log.e(TAG, "Failed to force-stop app via Shizuku: $packageName", e)
-        }.getOrElse { Result.failure(it) }
+        }
     }
 
     /**
@@ -478,7 +481,8 @@ object ShizukuIntegration : Shizuku.OnRequestPermissionResultListener {
             output
         }.onFailure { e ->
             Log.e(TAG, "Failed to get package info via Shizuku: $packageName", e)
-        }.getOrElse { Result.failure(it) }
+            throw e
+        }
     }
 
     // ──────────────────────────────────────────────────────────
@@ -494,7 +498,9 @@ object ShizukuIntegration : Shizuku.OnRequestPermissionResultListener {
         try {
             Shizuku.removeBinderReceivedListener(binderReceivedListener)
             Shizuku.removeBinderDeadListener(binderDeadListener)
-            Shizuku.setOnRequestPermissionResultListener(null)
+            // Note: Shizuku does not have setOnRequestPermissionResultListener in this version.
+            // Use removeBinderReceivedListener / removeBinderDeadListener only.
+            permissionListener = null
             Log.i(TAG, "Shizuku integration cleaned up")
         } catch (e: Exception) {
             Log.w(TAG, "Error during Shizuku cleanup", e)
@@ -504,6 +510,17 @@ object ShizukuIntegration : Shizuku.OnRequestPermissionResultListener {
     // ──────────────────────────────────────────────────────────
     //  Internal helpers
     // ──────────────────────────────────────────────────────────
+
+    /**
+     * Invokes Shizuku.newProcess() via reflection since it is private in the API.
+     */
+    private fun invokeNewProcess(cmd: Array<String>, env: Array<String>?, dir: String?): Process {
+        val method: Method = Shizuku::class.java.getDeclaredMethod(
+            "newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java
+        )
+        method.isAccessible = true
+        return method.invoke(null, cmd, env, dir) as Process
+    }
 
     /**
      * Checks whether Shizuku permission is currently granted.

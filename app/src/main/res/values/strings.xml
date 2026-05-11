@@ -140,4 +140,105 @@
     <string name="notification_logcat_channel_name">Logcat Monitor</string>
     <string name="notification_logcat_channel_desc">Shows when logcat monitoring is active</string>
 
+    <!-- ═══════════════════════════════════════════════════════════════
+         Home Screen
+         ═══════════════════════════════════════════════════════════════ -->
+    <string name="home_search_hint">Search apps…</string>
+    <string name="home_fab_install">Install app</string>
+    <string name="home_memory_summary">%1$d / %2$d MB (%3$d%%)</string>
+    <string name="home_running">Running</string>
+    <string name="home_empty_search">No apps match your search</string>
+    <string name="home_empty_title">No virtual apps yet</string>
+    <string name="home_empty_subtitle">Install your first app to get started</string>
+    <string name="home_empty_install_btn">Install App</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Install Screen
+         ═══════════════════════════════════════════════════════════════ -->
+    <string name="install_tab_device">From Device</string>
+    <string name="install_tab_file">From File</string>
+    <string name="install_success">%1$s installed successfully</string>
+    <string name="install_search_device_apps">Search device apps…</string>
+    <string name="install_hide_system">Hide system apps</string>
+    <string name="install_app_count">%1$d apps</string>
+    <string name="install_system_app">System app</string>
+    <string name="install_clone">Clone</string>
+    <string name="install_drag_drop">Drag &amp; drop an APK here</string>
+    <string name="install_supported_formats">APK and XAPK supported</string>
+    <string name="install_pick_file">Pick File</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Install Progress
+         ═══════════════════════════════════════════════════════════════ -->
+    <string name="install_parsing">Parsing APK…</string>
+    <string name="install_extracting">Extracting…</string>
+    <string name="install_installing">Installing…</string>
+    <string name="install_stage_parsing">Parsing</string>
+    <string name="install_stage_extracting">Extracting</string>
+    <string name="install_stage_installing">Installing</string>
+    <string name="install_stage_complete">Complete</string>
+    <string name="install_stage_error">Error</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Actions (additional)
+         ═══════════════════════════════════════════════════════════════ -->
+    <string name="action_retry">Retry</string>
+    <string name="action_done">Done</string>
+    <string name="action_more">More</string>
+    <string name="action_dismiss">Dismiss</string>
+    <string name="action_create_shortcut">Create Shortcut</string>
+    <string name="action_clear_data">Clear Data</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Logcat Screen
+         ═══════════════════════════════════════════════════════════════ -->
+    <string name="logcat_paused">Paused</string>
+    <string name="logcat_capturing">Capturing…</string>
+    <string name="logcat_stopped">Stopped</string>
+    <string name="logcat_start">Start capture</string>
+    <string name="logcat_resume">Resume</string>
+    <string name="logcat_pause">Pause</string>
+    <string name="logcat_stop">Stop capture</string>
+    <string name="logcat_clear">Clear logs</string>
+    <string name="logcat_export_chooser">Export logcat</string>
+    <string name="logcat_export">Export logs</string>
+    <string name="logcat_entry_count">%1$d entries</string>
+    <string name="logcat_waiting">Waiting for logs…</string>
+    <string name="logcat_empty">No log entries</string>
+    <string name="logcat_search_hint">Search logs…</string>
+    <string name="logcat_all_apps">All apps</string>
+    <string name="logcat_filter_package">Filter by package</string>
+    <string name="logcat_channel_name">Logcat Monitor</string>
+    <string name="logcat_channel_description">Shows when logcat monitoring is active</string>
+    <string name="logcat_notification_title">Logcat Capture Active</string>
+    <string name="logcat_notification_text">Atlas is capturing log output</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Settings Screen (additional)
+         ═══════════════════════════════════════════════════════════════ -->
+    <string name="settings_max_concurrent_desc">Maximum number of apps running simultaneously</string>
+    <string name="settings_heap_multiplier">Heap size multiplier: %1$dx</string>
+    <string name="settings_heap_multiplier_desc">Increases the virtual app heap size</string>
+    <string name="settings_storage">Storage</string>
+    <string name="settings_storage_usage">%1$s / %2$s GB (%3$d%%)</string>
+    <string name="settings_storage_apps">%1$d apps installed</string>
+    <string name="settings_clear_all_data">Clear all data</string>
+    <string name="settings_clear_all_data_desc">Delete all virtual app data and reset the environment</string>
+    <string name="settings_clear">Clear</string>
+    <string name="settings_export_apks">Export all APKs</string>
+    <string name="settings_export_apks_desc">Copy all virtual APKs to a shared directory</string>
+    <string name="settings_export">Export</string>
+    <string name="settings_advanced">Advanced</string>
+    <string name="settings_native_hooks">Native hooks</string>
+    <string name="settings_native_hooks_desc">Enable native-level hooks for GG compatibility</string>
+    <string name="settings_64bit">64-bit support</string>
+    <string name="settings_64bit_desc">Enable 64-bit virtual process support</string>
+    <string name="settings_shizuku_running">Shizuku is running</string>
+    <string name="settings_shizuku_not_installed">Shizuku is not installed</string>
+    <string name="settings_shizuku_unknown">Shizuku status unknown</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version</string>
+    <string name="settings_licenses">Open source licenses</string>
+    <string name="settings_github">View on GitHub</string>
+
 </resources>

@@ -2,6 +2,9 @@ package com.atlas.virtualspace.core.pm
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
 import com.atlas.virtualspace.core.fs.VirtualFileSystem
@@ -247,8 +250,8 @@ object VirtualPackageManager {
         return try {
             ApkFile(apkFile).use { apk ->
                 val iconData = apk.iconFile
-                if (iconData != null && iconData.data.isNotEmpty()) {
-                    Drawable.createFromByteArray(iconData.data)
+                if (iconData != null && iconData.data?.isNotEmpty() == true) {
+                    BitmapFactory.decodeByteArray(iconData.data, 0, iconData.data!!.size)?.let { BitmapDrawable(appContext.resources, it) }
                 } else {
                     // Fallback: try the system PackageManager for the real app
                     try {
@@ -367,7 +370,7 @@ object VirtualPackageManager {
                 ?: packageName.substringAfterLast('.')
 
             val versionName = meta.versionName ?: "unknown"
-            val versionCode = meta.versionCode?.toLongOrNull() ?: 0L
+            val versionCode = runCatching { meta.versionCode?.toLong() }.getOrNull() ?: 0L
 
             val targetSdk = meta.targetSdkVersion?.toIntOrNull() ?: 0
             val minSdk = meta.minSdkVersion?.toIntOrNull() ?: 0
@@ -377,45 +380,35 @@ object VirtualPackageManager {
             val is64Bit = has64BitLibs(file)
 
             // Heuristic: game detection based on features
-            val isGame = meta.isFeatureAnyOf(
-                "android.hardware.game",
-                "android.software.vulkan.deqp.level"
-            ) || meta.useFeatures.any {
+            val isGame = meta.usesFeatures?.any {
                 it.name.contains("game", ignoreCase = true)
-            }
+            } ?: false
 
-            // Launch activity: pick the first activity with MAIN/LAUNCHER intent.
-            // apk-parser provides activity lists with intent-filter metadata.
+            // Launch activity: try to get from manifest via package manager
             val launchActivity = try {
-                apk.apkMeta.activities?.firstOrNull { act ->
-                    act.intentFilters?.any { filter ->
-                        filter.actions?.any { it.name == "android.intent.action.MAIN" } == true &&
-                                filter.categories?.any { it.name == "android.intent.category.LAUNCHER" } == true
-                    } == true
-                }?.name
+                appContext.packageManager.getLaunchIntentForPackage(packageName)?.component?.className
             } catch (_: Exception) {
-                // Some APKs have malformed manifests; degrade gracefully
                 null
             }
 
             val permissions = meta.permissions?.map { it.name } ?: emptyList()
 
-            val nativeLibs = meta.useFeatures
-                .filter { it.name.startsWith("android.hardware.") && it.name.contains("opengl") }
+            val nativeLibs = (meta.usesFeatures ?: emptyList())
                 .map { it.name }
+                .filter { it.startsWith("android.hardware.") && it.contains("opengl") }
 
             // Split configs: density / ABI features for reference
-            val splitConfigs = meta.useFeatures
-                .filter { feat ->
-                    feat.name.startsWith("android.hardware.screen.") ||
-                            feat.name.startsWith("android.hardware.opengles.")
-                }
+            val splitConfigs = (meta.usesFeatures ?: emptyList())
                 .map { it.name }
+                .filter { feat ->
+                    feat.startsWith("android.hardware.screen.") ||
+                            feat.startsWith("android.hardware.opengles.")
+                }
 
             val icon = try {
                 val iconFile = apk.iconFile
-                if (iconFile != null && iconFile.data.isNotEmpty()) {
-                    Drawable.createFromByteArray(iconFile.data)
+                if (iconFile != null && iconFile.data?.isNotEmpty() == true) {
+                    BitmapFactory.decodeByteArray(iconFile.data, 0, iconFile.data!!.size)?.let { BitmapDrawable(appContext.resources, it) }
                 } else null
             } catch (_: Exception) {
                 null
@@ -615,6 +608,6 @@ object VirtualPackageManager {
      */
     private fun ApkMeta.isFeatureAnyOf(vararg names: String): Boolean {
         val nameSet = names.toSet()
-        return useFeatures.any { it.name in nameSet }
+        return usesFeatures?.any { it.name in nameSet } ?: false
     }
 }

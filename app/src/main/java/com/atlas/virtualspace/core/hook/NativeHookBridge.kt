@@ -245,7 +245,7 @@ class NativeHookBridge {
                 runCatching {
                     if (!nativeInitialized.getAndSet(false)) {
                         Log.d(TAG, "Native hooks not initialized — nothing to tear down")
-                        return Result.success(Unit)
+                        return@withLock Result.success(Unit)
                     }
 
                     val result = cleanupNativeBridge()
@@ -254,6 +254,7 @@ class NativeHookBridge {
                     }
                     initializedPath = null
                     Log.i(TAG, "Native hooks cleaned up successfully")
+                    Unit
                 }.onFailure { e ->
                     Log.e(TAG, "Failed to clean up native hooks", e)
                 }

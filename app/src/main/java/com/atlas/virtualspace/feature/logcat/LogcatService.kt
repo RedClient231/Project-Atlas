@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import androidx.core.app.NotificationCompat
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -245,7 +246,7 @@ class LogcatService : Service() {
         )
 
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
+            NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle(getString(R.string.logcat_notification_title))
                 .setContentText(getString(R.string.logcat_notification_text))
                 .setSmallIcon(R.drawable.ic_logcat_notification)
@@ -254,7 +255,7 @@ class LogcatService : Service() {
                 .build()
         } else {
             @Suppress("DEPRECATION")
-            Notification.Builder(this)
+            NotificationCompat.Builder(this)
                 .setContentTitle(getString(R.string.logcat_notification_title))
                 .setContentText(getString(R.string.logcat_notification_text))
                 .setSmallIcon(R.drawable.ic_logcat_notification)

@@ -178,27 +178,27 @@ class SettingsViewModel @Inject constructor(
     // ── Internal ─────────────────────────────────────────────────────────
 
     private fun combineSettingsFlows(): Flow<SettingsUiState> {
+        val ggCompat = dataStore.data.map { it[SettingKeys.GAME_GUARDIAN_COMPAT] ?: false }
+        val maxConcurrent = dataStore.data.map { it[SettingKeys.MAX_CONCURRENT_APPS] ?: 5 }
+        val heapMult = dataStore.data.map { it[SettingKeys.HEAP_SIZE_MULTIPLIER] ?: 1 }
+        val nativeHooks = dataStore.data.map { it[SettingKeys.ENABLE_NATIVE_HOOKS] ?: true }
+        val bit64 = dataStore.data.map { it[SettingKeys.ENABLE_64BIT_SUPPORT] ?: true }
+        val shizuku = dataStore.data.map { it[SettingKeys.SHIZUKU_STATUS] ?: "unknown" }
+
         return kotlinx.coroutines.flow.combine(
-            dataStore.data.map { it[SettingKeys.GAME_GUARDIAN_COMPAT] ?: false },
-            dataStore.data.map { it[SettingKeys.MAX_CONCURRENT_APPS] ?: 5 },
-            dataStore.data.map { it[SettingKeys.HEAP_SIZE_MULTIPLIER] ?: 1 },
-            dataStore.data.map { it[SettingKeys.ENABLE_NATIVE_HOOKS] ?: true },
-            dataStore.data.map { it[SettingKeys.ENABLE_64BIT_SUPPORT] ?: true },
-            dataStore.data.map { it[SettingKeys.SHIZUKU_STATUS] ?: "unknown" },
-            _isClearingData,
-            _isExporting,
-        ) { ggCompat, maxConcurrent, heapMult, nativeHooks, bit64, shizuku, clearing, exporting ->
+            ggCompat, maxConcurrent, heapMult, nativeHooks, bit64, shizuku, _isClearingData, _isExporting
+        ) { args: Array<Any?> ->
             val storage = getStorageInfo()
             SettingsUiState(
-                gameGuardianCompat = ggCompat,
-                maxConcurrentApps = maxConcurrent,
-                heapSizeMultiplier = heapMult,
-                enableNativeHooks = nativeHooks,
-                enable64BitSupport = bit64,
-                shizukuStatus = shizuku,
+                gameGuardianCompat = args[0] as Boolean,
+                maxConcurrentApps = args[1] as Int,
+                heapSizeMultiplier = args[2] as Int,
+                enableNativeHooks = args[3] as Boolean,
+                enable64BitSupport = args[4] as Boolean,
+                shizukuStatus = args[5] as String,
                 storageInfo = storage,
-                isClearingData = clearing,
-                isExporting = exporting,
+                isClearingData = args[6] as Boolean,
+                isExporting = args[7] as Boolean,
             )
         }
     }

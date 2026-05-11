@@ -129,6 +129,7 @@ class ProcessConnector(
             heartbeatFailures.set(0)
             connected.set(true)
             Log.i(TAG, "Connected to virtual process: $packageName")
+            Unit
         }.onFailure { e ->
             Log.e(TAG, "Failed to connect to $packageName", e)
             connected.set(false)
@@ -156,6 +157,7 @@ class ProcessConnector(
 
             unlinkDeathRecipient()
             Log.i(TAG, "Disconnected from virtual process: $packageName")
+            Unit
         }.onFailure { e ->
             Log.e(TAG, "Error during disconnect for $packageName", e)
         }

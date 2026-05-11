@@ -145,6 +145,7 @@ object SystemServiceHooks {
 
             hookedServices.add("ActivityManager")
             Log.i(TAG, "ActivityManager hooks installed successfully")
+            Unit
         }.onFailure { e ->
             Log.e(TAG, "Failed to hook ActivityManager", e)
         }
@@ -248,6 +249,7 @@ object SystemServiceHooks {
 
             hookedServices.add("PackageManager")
             Log.i(TAG, "PackageManager hooks installed successfully")
+            Unit
         }.onFailure { e ->
             Log.e(TAG, "Failed to hook PackageManager", e)
         }
@@ -302,6 +304,7 @@ object SystemServiceHooks {
 
             hookedServices.add("WindowManager")
             Log.i(TAG, "WindowManager hooks installed successfully")
+            Unit
         }.onFailure { e ->
             Log.e(TAG, "Failed to hook WindowManager", e)
         }
@@ -372,6 +375,7 @@ object SystemServiceHooks {
 
             hookedServices.add("AlarmManager")
             Log.i(TAG, "AlarmManager hooks installed successfully")
+            Unit
         }.onFailure { e ->
             Log.e(TAG, "Failed to hook AlarmManager", e)
         }
@@ -417,6 +421,7 @@ object SystemServiceHooks {
             installedHookIds.clear()
             hookedServices.clear()
             Log.i(TAG, "All system service hooks removed")
+            Unit
         }.onFailure { e ->
             Log.e(TAG, "Failed to unhook all system service hooks", e)
         }

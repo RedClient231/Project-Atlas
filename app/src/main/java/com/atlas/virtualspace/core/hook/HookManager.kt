@@ -86,12 +86,13 @@ object HookManager {
                 return Result.success(Unit)
             }
 
-            PineConfig.debugMode = config.debugMode
+            PineConfig.debug = config.debugMode
 
             classLoader = config.classLoader
 
             initialized = true
             Log.i(TAG, "Pine hook framework initialized (debugMode=${config.debugMode})")
+            Unit
         }.onFailure { e ->
             Log.e(TAG, "Failed to initialize Pine hook framework", e)
         }
@@ -268,6 +269,7 @@ object HookManager {
 
             unhook.unhook()
             Log.d(TAG, "Unhooked hookId=$hookId")
+            Unit
         }.onFailure { e ->
             Log.e(TAG, "Failed to unhook $hookId", e)
         }
@@ -304,6 +306,7 @@ object HookManager {
                 "Unhooked all ${ids.size} hooks"
             }
             Log.i(TAG, msg)
+            Unit
         }.onFailure { e ->
             Log.e(TAG, "Failed during unhookAll", e)
         }

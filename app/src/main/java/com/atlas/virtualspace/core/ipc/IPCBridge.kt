@@ -115,6 +115,7 @@ object IPCBridge {
             connectionTimestamps[packageName] = System.currentTimeMillis()
 
             Log.i(TAG, "IPC connection established for $packageName")
+            Unit
         }.onFailure { e ->
             Log.e(TAG, "Failed to establish connection for $packageName", e)
         }
@@ -138,6 +139,7 @@ object IPCBridge {
             } else {
                 Log.i(TAG, "IPC connection closed for $packageName")
             }
+            Unit
         }.onFailure { e ->
             Log.e(TAG, "Failed to close connection for $packageName", e)
         }
@@ -153,6 +155,7 @@ object IPCBridge {
                 closeConnection(packageName)
             }
             Log.i(TAG, "All IPC connections closed (${packageNames.size})")
+            Unit
         }.onFailure { e ->
             Log.e(TAG, "Failed to close all connections", e)
         }

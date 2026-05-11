@@ -1,0 +1,17 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?attr/colorControlNormal">
+    <!-- Rounded square outline (stroke only) -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@android:color/white"
+        android:strokeWidth="1.2"
+        android:pathData="M4,4h16c1.1,0 2,0.9 2,2v12c0,1.1 -0.9,2 -2,2H4c-1.1,0 -2,-0.9 -2,-2V6c0,-1.1 0.9,-2 2,-2z" />
+    <!-- Circle inside representing a generic app icon -->
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M12,8.5c1.38,0 2.5,1.12 2.5,2.5s-1.12,2.5 -2.5,2.5 -2.5,-1.12 -2.5,-2.5S10.62,8.5 12,8.5z" />
+</vector>
