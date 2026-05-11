@@ -210,8 +210,7 @@
 
 # Hilt's ViewModelFactory
 -keepclassmembers class * extends androidx.lifecycle.ViewModel {
-    <init>(javax.inject.Provider<java.util.Map<java.lang.String, javax.inject.Provider<androidx.lifecycle.ViewModel>>>);
-    <init>(java.util.Map<java.lang.String, javax.inject.Provider<androidx.lifecycle.ViewModel>>);
+    <init>(...);
 }
 
 # ─── Gson ───────────────────────────────────────────────────────────────────
