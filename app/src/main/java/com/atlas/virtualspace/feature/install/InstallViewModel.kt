@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.atlas.virtualspace.core.engine.VirtualEngine
 import com.atlas.virtualspace.core.pm.InstallType
 import com.atlas.virtualspace.core.pm.VirtualPackageManager
+import com.atlas.virtualspace.diagnostics.AtlasLogcatReporter
 import com.atlas.virtualspace.ui.components.InstallStage
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -200,6 +201,7 @@ class InstallViewModel @Inject constructor(
                         )
                     }.onFailure { error ->
                         Timber.e(error, "File install failed for %s", uri)
+                        AtlasLogcatReporter.reportError("Install", "File install failed: ${error.message}", error)
                         _uiState.value = _uiState.value.copy(
                             installState = InstallState.Error(
                                 error.message ?: "Installation failed"
@@ -230,16 +232,11 @@ class InstallViewModel @Inject constructor(
     fun detectXapk(file: File): Boolean {
         if (file.name.endsWith(".xapk", ignoreCase = true)) return true
         // Check for manifest.json inside the ZIP (XAPK signature)
+        // Use ZipFile instead of ZipInputStream for more reliable reading
         return try {
-            java.util.zip.ZipInputStream(java.io.FileInputStream(file)).use { zip ->
-                var entry = zip.nextEntry
-                while (entry != null) {
-                    if (entry.name == "manifest.json") return true
-                    zip.closeEntry()
-                    entry = zip.nextEntry
-                }
+            java.util.zip.ZipFile(file).use { zip ->
+                zip.getEntry("manifest.json") != null
             }
-            false
         } catch (_: Exception) {
             false
         }

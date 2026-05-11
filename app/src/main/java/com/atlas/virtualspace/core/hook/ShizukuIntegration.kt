@@ -99,12 +99,17 @@ object ShizukuIntegration {
             Shizuku.addBinderReceivedListener(binderReceivedListener)
             Shizuku.addBinderDeadListener(binderDeadListener)
 
+            // Register permission result listener — this is CRITICAL for
+            // requestPermission() to work. Without it, the CountDownLatch
+            // always times out and status stays "unknown".
+            permissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResults ->
+                onRequestPermissionResult(requestCode, grantResults)
+            }
+            Shizuku.addRequestPermissionResultListener(permissionListener)
+
             // Check initial state
             isAvailable.set(Shizuku.getBinder() != null)
             isPermissionGranted.set(checkPermission(context))
-
-            // Note: Shizuku does not have setOnRequestPermissionResultListener in this version.
-            // Permission results are handled via addRequestPermissionResultListener.
 
             Log.i(
                 TAG,
@@ -490,6 +495,27 @@ object ShizukuIntegration {
     // ──────────────────────────────────────────────────────────
 
     /**
+     * Returns the current Shizuku status as a string suitable for UI display.
+     *
+     * Possible values:
+     * - "running" — Shizuku is available AND permission is granted
+     * - "available" — Shizuku is running but permission not yet granted
+     * - "not_installed" — Shizuku is not installed or not running
+     * - "unknown" — Could not determine status (error)
+     */
+    fun getShizukuStatus(): String {
+        return try {
+            when {
+                Shizuku.getBinder() != null && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED -> "running"
+                Shizuku.getBinder() != null -> "available"
+                else -> "not_installed"
+            }
+        } catch (e: ClassNotFoundException) -> "not_installed"
+        catch (e: NoClassDefFoundError) -> "not_installed"
+        catch (e: Exception) -> "unknown"
+    }
+
+    /**
      * Removes all Shizuku listeners and cleans up resources.
      *
      * Call this during app shutdown to avoid leaking listeners.
@@ -498,8 +524,9 @@ object ShizukuIntegration {
         try {
             Shizuku.removeBinderReceivedListener(binderReceivedListener)
             Shizuku.removeBinderDeadListener(binderDeadListener)
-            // Note: Shizuku does not have setOnRequestPermissionResultListener in this version.
-            // Use removeBinderReceivedListener / removeBinderDeadListener only.
+            permissionListener?.let {
+                Shizuku.removeRequestPermissionResultListener(it)
+            }
             permissionListener = null
             Log.i(TAG, "Shizuku integration cleaned up")
         } catch (e: Exception) {

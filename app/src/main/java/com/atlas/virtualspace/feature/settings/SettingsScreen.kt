@@ -2,6 +2,7 @@ package com.atlas.virtualspace.feature.settings
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -52,6 +53,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atlas.virtualspace.BuildConfig
 import com.atlas.virtualspace.R
+import com.atlas.virtualspace.diagnostics.AtlasLogcatReporter
 import com.atlas.virtualspace.feature.settings.SettingKeys
 import kotlinx.coroutines.launch
 
@@ -302,12 +304,14 @@ fun SettingsScreen(
                         Text(
                             text = when (uiState.shizukuStatus) {
                                 "running" -> stringResource(R.string.settings_shizuku_running)
+                                "available" -> stringResource(R.string.settings_shizuku_available)
                                 "not_installed" -> stringResource(R.string.settings_shizuku_not_installed)
                                 else -> stringResource(R.string.settings_shizuku_unknown)
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = when (uiState.shizukuStatus) {
                                 "running" -> MaterialTheme.colorScheme.primary
+                                "available" -> MaterialTheme.colorScheme.tertiary
                                 else -> MaterialTheme.colorScheme.onSurfaceVariant
                             },
                         )
@@ -317,6 +321,103 @@ fun SettingsScreen(
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // DIAGNOSTICS
+        // ═══════════════════════════════════════════════════════════════════
+        SettingsSectionHeader(
+            icon = Icons.Default.Build,
+            title = stringResource(R.string.settings_diagnostics),
+        )
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                // Dump logcat button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.settings_dump_logcat),
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        Text(
+                            text = stringResource(R.string.settings_dump_logcat_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    OutlinedButton(onClick = {
+                        val path = AtlasLogcatReporter.dumpLogcat()
+                        if (path != null) {
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.settings_logcat_dump_saved),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }) {
+                        Icon(
+                            Icons.Default.Code,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Dump")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Report info
+                val reportFiles = AtlasLogcatReporter.getReportFiles()
+                val reportCount = reportFiles.size
+                val reportSize = AtlasLogcatReporter.getReportTotalSize()
+                val reportSizeStr = when {
+                    reportSize < 1024 -> "$reportSize B"
+                    reportSize < 1024 * 1024 -> "${reportSize / 1024} KB"
+                    else -> "${reportSize / (1024 * 1024)} MB"
+                }
+
+                Text(
+                    text = stringResource(R.string.settings_report_count, reportCount, reportSizeStr),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                Text(
+                    text = AtlasLogcatReporter.getReportDirPath(),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Clear reports
+                OutlinedButton(
+                    onClick = {
+                        AtlasLogcatReporter.clearAllReports()
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.settings_reports_cleared),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(stringResource(R.string.settings_clear_reports))
                 }
             }
         }

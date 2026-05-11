@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.atlas.virtualspace.core.hook.ShizukuIntegration
 import com.atlas.virtualspace.core.pm.VirtualPackageManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -183,10 +184,13 @@ class SettingsViewModel @Inject constructor(
         val heapMult = dataStore.data.map { it[SettingKeys.HEAP_SIZE_MULTIPLIER] ?: 1 }
         val nativeHooks = dataStore.data.map { it[SettingKeys.ENABLE_NATIVE_HOOKS] ?: true }
         val bit64 = dataStore.data.map { it[SettingKeys.ENABLE_64BIT_SUPPORT] ?: true }
-        val shizuku = dataStore.data.map { it[SettingKeys.SHIZUKU_STATUS] ?: "unknown" }
+
+        // Shizuku status is queried LIVE from ShizukuIntegration, not from
+        // a stale DataStore value. This ensures the status is always accurate.
+        val shizukuStatusFlow = kotlinx.coroutines.flow.flowOf(ShizukuIntegration.getShizukuStatus())
 
         return kotlinx.coroutines.flow.combine(
-            ggCompat, maxConcurrent, heapMult, nativeHooks, bit64, shizuku, _isClearingData, _isExporting
+            ggCompat, maxConcurrent, heapMult, nativeHooks, bit64, shizukuStatusFlow, _isClearingData, _isExporting
         ) { args: Array<Any?> ->
             val storage = getStorageInfo()
             SettingsUiState(

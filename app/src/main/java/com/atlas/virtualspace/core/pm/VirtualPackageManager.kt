@@ -518,11 +518,16 @@ object VirtualPackageManager {
     /**
      * Copies OBB files that the *real* installed app has on the device
      * into the virtual OBB directory.
+     *
+     * This is best-effort: many apps don't have OBB files, and that's fine.
+     * Returns success even if no OBB files exist — only fails on I/O errors
+     * when OBB files ARE present but can't be copied.
      */
     private fun copyObbFromDevice(packageName: String): Result<Unit> = runCatching {
         val realObbDir = File("/storage/emulated/0/Android/obb/$packageName")
         if (!realObbDir.exists() || !realObbDir.isDirectory) {
-            throw IOException("No OBB directory on device for $packageName")
+            // No OBB directory on device — this is normal for most apps
+            return Result.success(Unit)
         }
         val virtualObbDir = VirtualFileSystem.getAppObbDir(packageName)
         if (!virtualObbDir.exists() && !virtualObbDir.mkdirs()) {
@@ -531,7 +536,8 @@ object VirtualPackageManager {
 
         val obbFiles = realObbDir.listFiles()?.filter { it.name.endsWith(".obb") } ?: emptyList()
         if (obbFiles.isEmpty()) {
-            throw IOException("No OBB files found for $packageName")
+            // No OBB files — not an error, just no OBB data to copy
+            return Result.success(Unit)
         }
 
         for (obb in obbFiles) {
@@ -562,19 +568,24 @@ object VirtualPackageManager {
     private fun unzipTo(zipFile: File, destDir: File): List<File> {
         val extracted = mutableListOf<File>()
 
-        ZipInputStream(FileInputStream(zipFile)).use { zip ->
-            var entry: ZipEntry? = zip.nextEntry
-            while (entry != null) {
-                val outFile = File(destDir, entry!!.name)
+        if (!zipFile.exists() || zipFile.length() == 0L) {
+            throw IOException("ZIP file is empty or does not exist: ${zipFile.absolutePath}")
+        }
+
+        java.util.zip.ZipFile(zipFile).use { zip ->
+            val entries = zip.entries()
+            while (entries.hasMoreElements()) {
+                val entry = entries.nextElement()
+                val outFile = File(destDir, entry.name)
 
                 // Security: prevent zip-slip (path traversal)
                 val canonicalDest = destDir.canonicalPath
                 val canonicalOut = outFile.canonicalPath
                 if (!canonicalOut.startsWith(canonicalDest + File.separator) && canonicalOut != canonicalDest) {
-                    throw IOException("Zip slip detected: ${entry!!.name}")
+                    throw IOException("Zip slip detected: ${entry.name}")
                 }
 
-                if (entry!!.isDirectory) {
+                if (entry.isDirectory) {
                     if (!outFile.exists() && !outFile.mkdirs()) {
                         throw IOException("Cannot create dir: ${outFile.absolutePath}")
                     }
@@ -584,17 +595,17 @@ object VirtualPackageManager {
                             throw IOException("Cannot create parent dir: ${parent.absolutePath}")
                         }
                     }
-                    FileOutputStream(outFile).use { out ->
-                        val buffer = ByteArray(8192)
-                        var read: Int
-                        while (zip.read(buffer).also { read = it } != -1) {
-                            out.write(buffer, 0, read)
+                    zip.getInputStream(entry).use { input ->
+                        FileOutputStream(outFile).use { out ->
+                            val buffer = ByteArray(8192)
+                            var read: Int
+                            while (input.read(buffer).also { read = it } != -1) {
+                                out.write(buffer, 0, read)
+                            }
                         }
                     }
                     extracted.add(outFile)
                 }
-                zip.closeEntry()
-                entry = zip.nextEntry
             }
         }
 

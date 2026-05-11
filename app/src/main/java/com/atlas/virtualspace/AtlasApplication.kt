@@ -6,6 +6,10 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.atlas.virtualspace.core.engine.VirtualEngine
+import com.atlas.virtualspace.core.hook.ShizukuIntegration
+import com.atlas.virtualspace.core.pm.VirtualPackageManager
+import com.atlas.virtualspace.data.database.AppDatabase
+import com.atlas.virtualspace.diagnostics.AtlasLogcatReporter
 import dagger.hilt.android.HiltAndroidApp
 import timber.log.Timber
 import java.io.File
@@ -53,10 +57,19 @@ class AtlasApplication : Application() {
         // 1. Install Timber logging.
         installTimber()
 
-        // 2. Install uncaught-exception handler.
+        // 2. Initialize the logcat reporter FIRST so that any subsequent
+        //    errors or crashes are captured to internal storage.
+        AtlasLogcatReporter.initialize(this)
+
+        // 3. Install uncaught-exception handler (uses AtlasLogcatReporter).
         installCrashHandler()
 
-        // 3. Register process lifecycle observer.
+        // 4. Initialize core singletons BEFORE any feature tries to use them.
+        //    This prevents "lateinit property has not been initialized" crashes
+        //    when the user tries to install an APK before the engine service starts.
+        initializeCoreComponents()
+
+        // 5. Register process lifecycle observer.
         ProcessLifecycleOwner.get().lifecycle.addObserver(engineLifecycleObserver)
 
         Timber.i("AtlasApplication initialised")
@@ -72,6 +85,45 @@ class AtlasApplication : Application() {
         }
     }
 
+    // ─── Core Component Initialization ────────────────────────────
+
+    /**
+     * Initializes all core singletons that are required before any feature
+     * (install, launch, settings) can work.
+     *
+     * Previously these were only initialized when [VirtualEngineService]
+     * started, which caused crashes when the user tried to install an APK
+     * before the service was running.
+     *
+     * Now they are initialized eagerly in [onCreate] so that the app is
+     * always in a usable state.
+     */
+    private fun initializeCoreComponents() {
+        try {
+            // Initialize virtual filesystem first — many components depend on it.
+            val vfsResult = com.atlas.virtualspace.core.fs.VirtualFileSystem.initialize(this)
+            if (vfsResult.isFailure) {
+                Timber.e(vfsResult.exceptionOrNull(), "VirtualFileSystem initialization failed in Application.onCreate")
+            }
+
+            // Initialize Room database and VirtualPackageManager.
+            val database = AppDatabase.create(this)
+            VirtualPackageManager.initialize(database)
+            VirtualPackageManager.setContext(this)
+
+            // Initialize Shizuku integration (non-fatal — app works without Shizuku).
+            val shizukuResult = ShizukuIntegration.initialize(this)
+            if (shizukuResult.isFailure) {
+                Timber.w(shizukuResult.exceptionOrNull(), "Shizuku integration not available")
+            }
+
+            Timber.i("Core components initialized: VFS=%s, Shizuku=%s",
+                vfsResult.isSuccess, shizukuResult.isSuccess)
+        } catch (e: Exception) {
+            Timber.e(e, "Critical error during core component initialization")
+        }
+    }
+
     // ─── Engine State ────────────────────────────────────────────
 
     /**
@@ -82,7 +134,9 @@ class AtlasApplication : Application() {
     // ─── Crash Handler ───────────────────────────────────────────
 
     private val crashLogDir by lazy {
-        File(filesDir, "crash_logs").also { dir ->
+        // Use internal storage: /data/data/{pkg}/app_atlas_reports/
+        // This is accessible via Settings > Storage and is NOT on SD card.
+        File(getDir("atlas_reports", MODE_PRIVATE), "crash_logs").also { dir ->
             if (!dir.exists()) dir.mkdirs()
         }
     }
@@ -100,7 +154,13 @@ class AtlasApplication : Application() {
                 persistCrashLog(thread, throwable)
             } catch (e: Exception) {
                 // If we can't write the crash log there's nothing we can do.
-                Timber.e(e, "Failed to persist crash log")
+            }
+
+            // Also write to the diagnostics reporter (internal storage)
+            try {
+                AtlasLogcatReporter.reportCrash(thread, throwable)
+            } catch (_: Exception) {
+                // Best effort
             }
 
             // Delegate to the original handler so the process still terminates
@@ -220,6 +280,6 @@ class AtlasApplication : Application() {
     }
 
     companion object {
-        private const val MAX_CRASH_LOGS = 10
+        private const val MAX_CRASH_LOGS = 20
     }
 }
