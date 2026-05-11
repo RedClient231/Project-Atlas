@@ -8,7 +8,7 @@ import android.os.Looper
 import android.os.Parcel
 import android.os.RemoteException
 import android.util.Log
-import com.atlas.virtualspace.core.engine.InstallType
+import com.atlas.virtualspace.core.pm.InstallType
 import com.atlas.virtualspace.core.engine.ProcessState
 import com.atlas.virtualspace.core.engine.VirtualEngine
 import java.io.File

@@ -52,7 +52,6 @@ object VirtualEngine {
 
     @Volatile
     private var engineConfig: EngineConfig = EngineConfig(
-        classLoader = VirtualEngine::class.java.classLoader!!,
         virtualRootPath = "/data/data/unknown/virtual_root"
     )
 

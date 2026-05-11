@@ -369,7 +369,7 @@ class VirtualActivityManager internal constructor() {
      * package, we rewrite the intent to carry extra metadata so the
      * internal routing knows this is a virtual launch.
      */
-    private fun interceptActivityStart(callFrame: top.canyie.pine.core.CallFrame) {
+    private fun interceptActivityStart(callFrame: top.canyie.pine.Pine.CallFrame) {
         try {
             // execStartActivity signature varies by API level, but the Intent
             // is always among the parameters.

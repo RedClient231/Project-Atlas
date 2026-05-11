@@ -2,15 +2,12 @@ package com.atlas.virtualspace.core.hook
 
 import android.util.Log
 import com.atlas.virtualspace.core.engine.EngineConfig
-import top.canyie.pine.ISA
 import top.canyie.pine.Pine
 import top.canyie.pine.Pine.CallFrame
-import top.canyie.pine.Pine.HookRecord
 import top.canyie.pine.PineConfig
 import top.canyie.pine.callback.MethodHook
 import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -44,8 +41,8 @@ object HookManager {
     //  Internal state
     // ──────────────────────────────────────────────────────────
 
-    /** Maps a hook ID to its Pine [HookRecord] reference. */
-    private val hookCallbacks = ConcurrentHashMap<String, HookRecord>()
+    /** Maps a hook ID to its Pine MethodHook.Unhook reference. */
+    private val hookCallbacks = ConcurrentHashMap<String, MethodHook.Unhook>()
 
     /** Maps a hook ID to the [Method] it targets (needed for diagnostics). */
     private val hookTargets = ConcurrentHashMap<String, Method>()
@@ -66,6 +63,10 @@ object HookManager {
     @Volatile
     private var hookErrorListener: HookErrorListener? = null
 
+    /** ClassLoader stored from EngineConfig for resolving target classes. */
+    @Volatile
+    private var classLoader: ClassLoader? = null
+
     // ──────────────────────────────────────────────────────────
     //  Initialization
     // ──────────────────────────────────────────────────────────
@@ -75,7 +76,7 @@ object HookManager {
      *
      * Must be called before any hook operations. Calling a second time is a no-op.
      *
-     * @param config The engine configuration containing the classloader and other settings.
+     * @param config The engine configuration containing debug settings.
      * @return [Result.success] if Pine was configured, or [Result.failure] on error.
      */
     fun initialize(config: EngineConfig): Result<Unit> {
@@ -85,15 +86,12 @@ object HookManager {
                 return Result.success(Unit)
             }
 
-            PineConfig.isa = ISA.ARM64
-            PineConfig.experimental = true
-            config.classLoader?.let { PineConfig.classLoader = it }
+            PineConfig.debugMode = config.debugMode
 
-            // Force Pine to load and validate its native library early.
-            Pine.ensureInitialized()
+            classLoader = config.classLoader
 
             initialized = true
-            Log.i(TAG, "Pine hook framework initialized (isa=ARM64, experimental=true)")
+            Log.i(TAG, "Pine hook framework initialized (debugMode=${config.debugMode})")
         }.onFailure { e ->
             Log.e(TAG, "Failed to initialize Pine hook framework", e)
         }
@@ -141,9 +139,9 @@ object HookManager {
             val hookId = generateHookId(className, methodName)
             val pineCallback = createMethodHook(beforeHook, afterHook)
 
-            val hookRecord = Pine.hook(method, pineCallback)
+            val unhook = Pine.hook(method, pineCallback)
 
-            hookCallbacks[hookId] = hookRecord
+            hookCallbacks[hookId] = unhook
             hookTargets[hookId] = method
             hookMetadata[hookId] = HookInfo(
                 hookId = hookId,
@@ -181,6 +179,8 @@ object HookManager {
      * Hooks **all overloads** of [methodName] on the given class.
      *
      * This is useful for methods with multiple signatures (e.g. `startActivity`).
+     * Since Pine 0.3.0 does not have a built-in hookAllMethods, this uses
+     * reflection to find all methods with the given name and hooks each one.
      *
      * @param group Optional group name for batch unhook via [unhookGroup].
      * @return [Result.success] with the list of hook IDs (one per overload),
@@ -200,21 +200,27 @@ object HookManager {
                 ?: throw ClassNotFoundException("Class not found: $className")
 
             val pineCallback = createMethodHook(beforeHook, afterHook)
-            val hookRecords = Pine.hookAllMethods(clazz, methodName, pineCallback)
 
-            if (hookRecords.isEmpty()) {
+            // Pine 0.3.0 has no hookAllMethods; use reflection to find and hook each overload.
+            val matchingMethods = clazz.declaredMethods.filter { it.name == methodName }
+
+            if (matchingMethods.isEmpty()) {
                 Log.w(TAG, "No overloads found for $className.$methodName")
                 return@runCatching emptyList<String>()
             }
 
-            val hookIds = hookRecords.map { record ->
+            val hookIds = matchingMethods.map { method ->
+                method.isAccessible = true
+                val unhook = Pine.hook(method, pineCallback)
                 val hookId = generateHookId(className, methodName)
-                hookCallbacks[hookId] = record
+
+                hookCallbacks[hookId] = unhook
+                hookTargets[hookId] = method
                 hookMetadata[hookId] = HookInfo(
                     hookId = hookId,
                     className = className,
                     methodName = methodName,
-                    paramTypes = emptyList(),
+                    paramTypes = method.parameterTypes.map { it.name },
                     group = group,
                     installedAt = System.currentTimeMillis(),
                 )
@@ -224,14 +230,7 @@ object HookManager {
                 hookId
             }
 
-            // Store the first matching method for best-effort diagnostics.
-            clazz.declaredMethods
-                .firstOrNull { it.name == methodName }
-                ?.let { method ->
-                    hookIds.forEach { id -> hookTargets[id] = method }
-                }
-
-            Log.d(TAG, "Hooked ${hookRecords.size} overloads of $className.$methodName → hookIds=$hookIds" +
+            Log.d(TAG, "Hooked ${matchingMethods.size} overloads of $className.$methodName → hookIds=$hookIds" +
                     if (group != null) " [group=$group]" else "")
             hookIds
         }.onFailure { e ->
@@ -251,11 +250,11 @@ object HookManager {
      */
     fun unhook(hookId: String): Result<Unit> {
         return runCatching {
-            val hookRecord = hookCallbacks.remove(hookId)
+            val unhook = hookCallbacks.remove(hookId)
             hookTargets.remove(hookId)
             val info = hookMetadata.remove(hookId)
 
-            if (hookRecord == null) {
+            if (unhook == null) {
                 throw IllegalArgumentException("Hook ID not found: $hookId")
             }
 
@@ -267,7 +266,7 @@ object HookManager {
                 }
             }
 
-            Pine.unhook(hookRecord)
+            unhook.unhook()
             Log.d(TAG, "Unhooked hookId=$hookId")
         }.onFailure { e ->
             Log.e(TAG, "Failed to unhook $hookId", e)
@@ -285,11 +284,11 @@ object HookManager {
             var failedCount = 0
 
             for (hookId in ids) {
-                val hookRecord = hookCallbacks.remove(hookId)
+                val unhook = hookCallbacks.remove(hookId)
                 hookTargets.remove(hookId)
                 hookMetadata.remove(hookId)
-                if (hookRecord != null) {
-                    runCatching { Pine.unhook(hookRecord) }
+                if (unhook != null) {
+                    runCatching { unhook.unhook() }
                         .onFailure {
                             failedCount++
                             Log.w(TAG, "Failed to unhook $hookId during unhookAll", it)
@@ -319,11 +318,11 @@ object HookManager {
         val ids = hookGroups.remove(groupName) ?: return 0
         var removed = 0
         for (hookId in ids) {
-            val hookRecord = hookCallbacks.remove(hookId)
+            val unhook = hookCallbacks.remove(hookId)
             hookTargets.remove(hookId)
             hookMetadata.remove(hookId)
-            if (hookRecord != null) {
-                runCatching { Pine.unhook(hookRecord) }
+            if (unhook != null) {
+                runCatching { unhook.unhook() }
                     .onSuccess { removed++ }
                     .onFailure { Log.w(TAG, "Failed to unhook $hookId in group $groupName", it) }
             }
@@ -408,17 +407,20 @@ object HookManager {
      * Returns `null` if the class cannot be found through any strategy.
      */
     private fun findClass(className: String): Class<*>? {
-        // Strategy 1: Pine's configured classloader
+        // Strategy 1: ClassLoader from EngineConfig
         return runCatching {
-            PineConfig.classLoader?.loadClass(className)
+            classLoader?.loadClass(className)
         }.getOrNull() ?: runCatching {
-            // Strategy 2: Class.forName with Pine's classloader
-            Class.forName(className, false, PineConfig.classLoader)
+            // Strategy 2: Class.forName with stored classLoader
+            classLoader?.let { Class.forName(className, false, it) }
         }.getOrNull() ?: runCatching {
-            // Strategy 3: System classloader
+            // Strategy 3: Thread context classLoader
+            Thread.currentThread().contextClassLoader?.loadClass(className)
+        }.getOrNull() ?: runCatching {
+            // Strategy 4: System classloader
             ClassLoader.getSystemClassLoader().loadClass(className)
         }.getOrNull() ?: runCatching {
-            // Strategy 4: Default Class.forName
+            // Strategy 5: Default Class.forName
             Class.forName(className)
         }.getOrNull()
     }

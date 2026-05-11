@@ -2,6 +2,8 @@ package com.atlas.virtualspace.core.engine
 
 import android.app.ActivityManager
 import android.content.Context
+import android.os.Parcel
+import android.os.Parcelable
 import android.os.Build
 
 /**
@@ -16,7 +18,7 @@ data class MemoryInfo(
     val totalMb: Long,
     val usedMb: Long,
     val availableMb: Long
-) {
+) : Parcelable {
 
     /**
      * Returns memory usage as a percentage [0..100].
@@ -28,9 +30,32 @@ data class MemoryInfo(
         return percent.coerceIn(0, 100)
     }
 
-    companion object {
+    // ─── Parcelable ────────────────────────────────────────────
+
+    override fun writeToParcel(parcel: Parcel, flags: Int) {
+        parcel.writeLong(totalMb)
+        parcel.writeLong(usedMb)
+        parcel.writeLong(availableMb)
+    }
+
+    override fun describeContents(): Int = 0
+
+    companion object CREATOR : Parcelable.Creator<MemoryInfo> {
 
         private const val BYTES_PER_MB: Long = 1024L * 1024L
+
+        override fun createFromParcel(parcel: Parcel): MemoryInfo {
+            val totalMb = parcel.readLong()
+            val usedMb = parcel.readLong()
+            val availableMb = parcel.readLong()
+            return MemoryInfo(
+                totalMb = totalMb,
+                usedMb = usedMb,
+                availableMb = availableMb
+            )
+        }
+
+        override fun newArray(size: Int): Array<MemoryInfo?> = arrayOfNulls(size)
 
         /**
          * Creates a [MemoryInfo] from the system's [ActivityManager.MemoryInfo].
