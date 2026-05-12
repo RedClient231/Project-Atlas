@@ -210,15 +210,22 @@ object VirtualEngine {
     }
 
     /**
-     * Launches a virtual application.
+     * Launches a virtual application **in-process**.
      *
-     * FIXES applied:
-     * 1. Engine-not-ready guard: if the engine hasn't initialised yet (because
-     *    the async DB init in AtlasApplication hasn't completed), we attempt
-     *    a synchronous init with a clear error rather than silently failing.
-     * 2. Null launchActivity: now caught with a clear user-facing error.
-     * 3. Already-running path: correctly uses VirtualStubActivity intent
-     *    instead of trying getLaunchIntentForPackage on an uninstalled package.
+     * The game's APK is loaded via [DexClassLoader] inside Atlas's own process.
+     * Its native .so libraries are loaded via [System.load], making all memory
+     * regions visible in /proc/self/maps for GameGuardian compatibility.
+     *
+     * NO real-device installation occurs. The game never touches the system
+     * PackageManager, never shows an install dialog, and never leaves Atlas's
+     * process boundary.
+     *
+     * Flow:
+     * 1. Validate the app exists and has a launchActivity
+     * 2. Ensure the engine is initialized
+     * 3. Pre-load native libraries into the process (GG can see them immediately)
+     * 4. Create/reuse a virtual process record
+     * 5. Start [VirtualStubActivity] which loads the guest Activity in-process
      *
      * @param packageName The package name of the app to launch.
      * @return [Result.success] if the launch was dispatched, [Result.failure] otherwise.
@@ -234,9 +241,7 @@ object VirtualEngine {
                 return Result.failure(IllegalStateException("App is disabled: $packageName"))
             }
 
-            // Ensure the engine is initialized before we try to launch.
-            // The async init in AtlasApplication may not have completed yet
-            // if the user taps "Launch" very quickly after first install.
+            // Ensure the engine is initialized.
             if (!_isRunning.value) {
                 val ctx = applicationContext
                     ?: return Result.failure(
@@ -261,7 +266,7 @@ object VirtualEngine {
                 return Result.failure(
                     IllegalStateException(
                         "Cannot launch $packageName: no launcher activity found in APK manifest. " +
-                        "Try re-installing the app."
+                        "Try re-importing the app."
                     )
                 )
             }
@@ -269,12 +274,10 @@ object VirtualEngine {
             val ctx = applicationContext
                 ?: return Result.failure(IllegalStateException("Application context not available"))
 
-            // If already running, bring to foreground via VirtualStubActivity
-            // (NOT via PackageManager.getLaunchIntentForPackage — the app is
-            //  NOT installed on the real device in the import/file case).
-            val existing = processRecords[packageName]
-            if (existing != null && existing.isAlive()) {
-                Timber.i("App %s already running (pid %d) — bringing to foreground", packageName, existing.pid.get())
+            // If already running, bring the existing stub to foreground.
+            val existingCount = VirtualActivityThread.getActiveActivityCount(packageName)
+            if (existingCount > 0) {
+                Timber.i("App %s already has %d active activities — bringing to foreground", packageName, existingCount)
                 val bringForwardIntent = android.content.Intent(ctx, VirtualStubActivity::class.java).apply {
                     putExtra(VirtualStubActivity.EXTRA_PACKAGE_NAME, packageName)
                     putExtra(VirtualStubActivity.EXTRA_ACTIVITY_CLASS, launchActivity)
@@ -303,10 +306,15 @@ object VirtualEngine {
 
             startVirtualProcess(record, appInfo)
 
-            // Launch via VirtualStubActivity — it handles three strategies:
-            //  1. Direct launch (app already on device)
-            //  2. Shizuku install + am start (elevated, no dialog)
-            //  3. System package installer dialog
+            // Pre-load native libraries into Atlas's process BEFORE starting the
+            // activity. This ensures the .so memory regions are immediately visible
+            // in /proc/self/maps when GameGuardian attaches.
+            VirtualActivityThread.loadNativeLibraries(packageName, appInfo.nativeLibPath)
+
+            // Launch the guest Activity in-process via VirtualStubActivity.
+            // VirtualStubActivity uses DexClassLoader to load the guest APK's
+            // classes and instantiates the guest Activity inside our process.
+            // No real-device installation. No install dialog. Instant launch.
             val stubIntent = android.content.Intent(ctx, VirtualStubActivity::class.java).apply {
                 putExtra(VirtualStubActivity.EXTRA_PACKAGE_NAME, packageName)
                 putExtra(VirtualStubActivity.EXTRA_ACTIVITY_CLASS, launchActivity)
@@ -323,7 +331,7 @@ object VirtualEngine {
             _installedApps.value = updatedList
             persistAppRegistry()
 
-            Timber.i("Launched %s via VirtualStubActivity → %s (uid=%d, 64bit=%b)",
+            Timber.i("Launched %s in-process via VirtualStubActivity → %s (uid=%d, 64bit=%b)",
                 packageName, launchActivity, virtualUid, is64Bit)
             Result.success(Unit)
         } catch (e: Exception) {
@@ -374,8 +382,8 @@ object VirtualEngine {
     /**
      * Force-stops a running virtual application.
      *
-     * Sends a termination signal via the IPC bridge, removes the process
-     * record, and cleans up associated activity records.
+     * Destroys all in-process guest Activities via [VirtualActivityThread],
+     * removes the process record, and cleans up activity manager state.
      *
      * @param packageName The package name to force-stop.
      * @return [Result.success] if the app was stopped, [Result.failure] otherwise.
@@ -394,19 +402,16 @@ object VirtualEngine {
             // Update process state.
             record.state.set(ProcessState.STOPPING)
 
-            // Terminate the virtual process.
-            terminateVirtualProcess(record)
+            // Destroy all in-process guest Activities for this package.
+            VirtualActivityThread.destroyAllForPackage(packageName)
 
-            // Remove associated activities.
+            // Remove associated activities from the activity manager.
             activityManager.removeActivitiesForProcess(packageName)
 
-            // Final state update and cleanup.
+            // Final state update.
             record.state.set(ProcessState.STOPPED)
-            synchronized(processLock) {
-                processRecords.remove(packageName)
-            }
 
-            Timber.i("Force-stopped %s (pid was %d)", packageName, record.pid.get())
+            Timber.i("Force-stopped %s (destroyed in-process activities)", packageName)
             Result.success(Unit)
         } catch (e: Exception) {
             Timber.e(e, "Failed to force-stop %s", packageName)
@@ -417,35 +422,38 @@ object VirtualEngine {
     /**
      * Gracefully shuts down the entire virtual engine.
      *
-     * Stops all running processes, unhooks Pine, and releases resources.
+     * Destroys all in-process guest Activities, unhooks Pine, and releases resources.
      */
     fun shutdown() {
         if (!_isRunning.value) return
 
         Timber.i("VirtualEngine shutting down…")
 
-        // 1. Stop all running processes.
+        // 1. Destroy all in-process guest Activities and clear caches.
+        VirtualActivityThread.clearAll()
+
+        // 2. Stop all running process records.
         val packagesToStop = synchronized(processLock) {
             processRecords.keys.toList()
         }
         packagesToStop.forEach { pkg ->
             try {
-                forceStopApp(pkg)
+                synchronized(processLock) { processRecords.remove(pkg) }
             } catch (e: Exception) {
                 Timber.w(e, "Error stopping %s during shutdown", pkg)
             }
         }
 
-        // 2. Remove activity hooks.
+        // 3. Remove activity hooks.
         activityManager.removeHooks()
 
-        // 3. Unhook all framework hooks via HookManager.
+        // 4. Unhook all framework hooks via HookManager.
         HookManager.unhookAll()
 
-        // 4. Cancel coroutine scope.
+        // 5. Cancel coroutine scope.
         engineScope.cancel()
 
-        // 5. Clear state.
+        // 6. Clear state.
         _isRunning.value = false
         applicationContext = null
 
@@ -642,21 +650,9 @@ object VirtualEngine {
     }
 
     private fun terminateVirtualProcess(record: InternalProcessRecord) {
-        val pid = record.pid.get()
-
-        try {
-            // Try to force-stop the app via Shizuku (most reliable)
-            val shizuku = com.atlas.virtualspace.core.hook.ShizukuIntegration
-            if (shizuku.isShizukuAvailable() && shizuku.isShizukuPermissionGranted()) {
-                shizuku.forceStopWithShizuku(record.packageName)
-            } else if (pid > 0 && pid != Process.myPid()) {
-                // Only try to kill if PID is valid and NOT our own process
-                Process.killProcess(pid)
-            }
-        } catch (e: Exception) {
-            Timber.w(e, "Error terminating virtual process for %s", record.packageName)
-        }
-
+        // In the new architecture, virtual apps run in-process via DexClassLoader.
+        // There is no separate PID to kill. Guest Activities are destroyed via
+        // VirtualActivityThread.destroyAllForPackage() in forceStopApp().
         record.state.set(ProcessState.STOPPED)
     }
 
