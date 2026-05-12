@@ -70,6 +70,19 @@ class AtlasApplication : Application() {
     override fun onCreate() {
         super.onCreate()
 
+        // 0. Detect which process this is. If we're running in one of
+        //    Atlas's :pN stub processes, hand off immediately to the
+        //    vspace StubBootstrap and SKIP all host-side init (Room,
+        //    foreground service, etc.) — that state belongs to the host
+        //    process only.
+        val pname = currentProcessName()
+        if (pname != null && pname != packageName && pname.contains(":p")) {
+            Timber.plant(Timber.DebugTree())
+            Timber.i("[AtlasApplication] Stub process detected: %s", pname)
+            bootstrapStubProcess(pname)
+            return
+        }
+
         // 1. Install Timber logging first so everything below can log.
         installTimber()
 
@@ -234,5 +247,54 @@ class AtlasApplication : Application() {
 
     companion object {
         private const val MAX_CRASH_LOGS = 20
+    }
+
+    // ─── Stub process helpers ──────────────────────────────────────────────
+
+    /**
+     * Returns the process name ("com.atlas.virtualspace" or
+     * "com.atlas.virtualspace:p3"). Returns null if it can't be determined.
+     */
+    private fun currentProcessName(): String? {
+        return try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                Application.getProcessName()
+            } else {
+                val at = Class.forName("android.app.ActivityThread")
+                at.getDeclaredMethod("currentProcessName").invoke(null) as? String
+            }
+        } catch (_: Throwable) { null }
+    }
+
+    /**
+     * Called when this Application instance is running inside a stub `:pN`
+     * process. Reads the slot hint file to learn which guest to host, then
+     * delegates to the vspace StubBootstrap to install the ActivityThread
+     * and Instrumentation hooks before the stub Activity is created.
+     */
+    private fun bootstrapStubProcess(processName: String) {
+        val slotIndex = processName.substringAfterLast(":p").toIntOrNull()
+        if (slotIndex == null) {
+            Timber.w("[AtlasApplication] Could not parse slot from %s", processName)
+            return
+        }
+
+        val hint = File(filesDir.parentFile, "vspace_slots/slot_$slotIndex.hint")
+        if (!hint.exists()) {
+            Timber.w("[AtlasApplication] Stub :p%d has no guest hint file", slotIndex)
+            return
+        }
+        val guestPackage = try {
+            hint.readText().trim()
+        } catch (t: Throwable) {
+            Timber.e(t, "[AtlasApplication] Could not read slot hint")
+            return
+        }
+        if (guestPackage.isEmpty()) {
+            Timber.w("[AtlasApplication] Empty guest package in slot %d hint", slotIndex)
+            return
+        }
+
+        com.atlas.vspace.core.StubBootstrap.bootstrap(this, guestPackage)
     }
 }

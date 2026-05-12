@@ -9,6 +9,7 @@ import com.atlas.virtualspace.core.engine.VirtualEngine
 import com.atlas.virtualspace.core.pm.VirtualAppInfo
 import com.atlas.virtualspace.core.pm.VirtualPackageManager
 import com.atlas.virtualspace.data.database.AppDatabase
+import com.atlas.vspace.AtlasVirtualLauncher
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,6 +41,7 @@ data class HomeUiState(
 class HomeViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context,
     private val database: AppDatabase,
+    private val virtualLauncher: AtlasVirtualLauncher,
 ) : ViewModel() {
 
     private val dao = database.virtualAppDao()
@@ -118,12 +120,38 @@ class HomeViewModel @Inject constructor(
 
     fun launchApp(packageName: String) {
         viewModelScope.launch {
+            // Ensure the guest is registered with the vspace launcher before
+            // the first launch. VirtualPackageManager already has its APK in
+            // virtual storage; we just need to tell vspace about it.
+            val appInfo = withContext(Dispatchers.IO) {
+                VirtualPackageManager.getAppInfo(packageName)
+            }
+            if (appInfo == null) {
+                _snackbarMessage.value = "App not found in virtual space."
+                return@launch
+            }
+
+            val registered = withContext(Dispatchers.IO) {
+                virtualLauncher.registerGuest(
+                    apkPath = appInfo.apkPath,
+                    splitApkPaths = appInfo.splitApkPaths,
+                    nativeLibDir = appInfo.nativeLibPath,
+                )
+            }
+            if (registered.isFailure) {
+                Timber.e(registered.exceptionOrNull(), "Failed to register %s with vspace", packageName)
+                _snackbarMessage.value =
+                    "Could not parse APK: ${registered.exceptionOrNull()?.message ?: "unknown"}"
+                return@launch
+            }
+
             val result = withContext(Dispatchers.IO) {
-                VirtualPackageManager.launchApp(packageName)
+                virtualLauncher.launch(packageName)
             }
             if (result.isFailure) {
                 Timber.e(result.exceptionOrNull(), "Failed to launch %s", packageName)
-                _snackbarMessage.value = "Failed to launch: ${result.exceptionOrNull()?.message ?: "Unknown error"}"
+                _snackbarMessage.value =
+                    "Failed to launch: ${result.exceptionOrNull()?.message ?: "Unknown error"}"
             } else {
                 refreshRunningState()
             }

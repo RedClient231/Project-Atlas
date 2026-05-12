@@ -273,12 +273,8 @@
         </activity>
 
         <!--
-            Virtual Stub Activity
-            Proxy activity that bridges the Android system with virtual apps.
-            When the user taps "Launch" on a virtual app, this activity is
-            started with extras identifying the target package/activity.
-            It then loads the virtual app's classes via a custom ClassLoader
-            and starts the real activity within the Atlas host process.
+            Legacy VirtualStubActivity — kept for backward compatibility with
+            older UI code. New launches go through the vspace stub pool below.
         -->
         <activity
             android:name=".core.engine.VirtualStubActivity"
@@ -295,6 +291,79 @@
             </intent-filter>
 
         </activity>
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             VSPACE STUB ACTIVITIES (new architecture)
+
+             Atlas declares 10 stub processes (:p0 through :p9). Each stub
+             process contains 4 stub Activities with different launchModes
+             (standard, singleTop, singleTask, singleInstance) so a guest
+             Activity's launchMode can always be matched.
+
+             The concrete classes are in com.atlas.vspace.stub.StubActivity*;
+             they share a common base that finishes immediately if the
+             HCallback hook didn't redirect (fail-safe).
+             ═══════════════════════════════════════════════════════════════════ -->
+
+        <!-- Slot 0 -->
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P0_Std"      android:process=":p0" android:exported="false" android:launchMode="standard"      android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P0_Top"      android:process=":p0" android:exported="false" android:launchMode="singleTop"     android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P0_Task"     android:process=":p0" android:exported="false" android:launchMode="singleTask"    android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P0_Instance" android:process=":p0" android:exported="false" android:launchMode="singleInstance" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <!-- Slot 1 -->
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P1_Std"      android:process=":p1" android:exported="false" android:launchMode="standard"      android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P1_Top"      android:process=":p1" android:exported="false" android:launchMode="singleTop"     android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P1_Task"     android:process=":p1" android:exported="false" android:launchMode="singleTask"    android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P1_Instance" android:process=":p1" android:exported="false" android:launchMode="singleInstance" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <!-- Slot 2 -->
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P2_Std"      android:process=":p2" android:exported="false" android:launchMode="standard"      android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P2_Top"      android:process=":p2" android:exported="false" android:launchMode="singleTop"     android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P2_Task"     android:process=":p2" android:exported="false" android:launchMode="singleTask"    android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P2_Instance" android:process=":p2" android:exported="false" android:launchMode="singleInstance" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <!-- Slot 3 -->
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P3_Std"      android:process=":p3" android:exported="false" android:launchMode="standard"      android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P3_Top"      android:process=":p3" android:exported="false" android:launchMode="singleTop"     android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P3_Task"     android:process=":p3" android:exported="false" android:launchMode="singleTask"    android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P3_Instance" android:process=":p3" android:exported="false" android:launchMode="singleInstance" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <!-- Slot 4 -->
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P4_Std"      android:process=":p4" android:exported="false" android:launchMode="standard"      android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P4_Top"      android:process=":p4" android:exported="false" android:launchMode="singleTop"     android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P4_Task"     android:process=":p4" android:exported="false" android:launchMode="singleTask"    android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P4_Instance" android:process=":p4" android:exported="false" android:launchMode="singleInstance" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <!-- Slot 5 -->
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P5_Std"      android:process=":p5" android:exported="false" android:launchMode="standard"      android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P5_Top"      android:process=":p5" android:exported="false" android:launchMode="singleTop"     android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P5_Task"     android:process=":p5" android:exported="false" android:launchMode="singleTask"    android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P5_Instance" android:process=":p5" android:exported="false" android:launchMode="singleInstance" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <!-- Slot 6 -->
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P6_Std"      android:process=":p6" android:exported="false" android:launchMode="standard"      android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P6_Top"      android:process=":p6" android:exported="false" android:launchMode="singleTop"     android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P6_Task"     android:process=":p6" android:exported="false" android:launchMode="singleTask"    android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P6_Instance" android:process=":p6" android:exported="false" android:launchMode="singleInstance" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <!-- Slot 7 -->
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P7_Std"      android:process=":p7" android:exported="false" android:launchMode="standard"      android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P7_Top"      android:process=":p7" android:exported="false" android:launchMode="singleTop"     android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P7_Task"     android:process=":p7" android:exported="false" android:launchMode="singleTask"    android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P7_Instance" android:process=":p7" android:exported="false" android:launchMode="singleInstance" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <!-- Slot 8 -->
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P8_Std"      android:process=":p8" android:exported="false" android:launchMode="standard"      android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P8_Top"      android:process=":p8" android:exported="false" android:launchMode="singleTop"     android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P8_Task"     android:process=":p8" android:exported="false" android:launchMode="singleTask"    android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P8_Instance" android:process=":p8" android:exported="false" android:launchMode="singleInstance" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <!-- Slot 9 -->
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P9_Std"      android:process=":p9" android:exported="false" android:launchMode="standard"      android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P9_Top"      android:process=":p9" android:exported="false" android:launchMode="singleTop"     android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P9_Task"     android:process=":p9" android:exported="false" android:launchMode="singleTask"    android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name="com.atlas.vspace.stub.StubActivity_P9_Instance" android:process=":p9" android:exported="false" android:launchMode="singleInstance" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
         <!-- ═══════════════════════════════════════════════════════════════════
              SERVICES
