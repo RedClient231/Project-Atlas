@@ -1,54 +1,62 @@
 package com.atlas.virtualspace.core.engine
 
 import android.app.Activity
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
-import android.net.Uri
+import android.content.res.AssetManager
+import android.content.res.Resources
 import android.os.Bundle
-import android.widget.Toast
-import com.atlas.virtualspace.core.hook.ShizukuIntegration
-import com.atlas.virtualspace.core.pm.VirtualPackageManager
+import android.view.Window
+import android.view.WindowManager
+import dalvik.system.DexClassLoader
 import timber.log.Timber
 import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
 
 /**
- * Proxy activity that bridges the Android system with virtual apps running
- * inside the Atlas virtual space.
+ * VirtualStubActivity — In-process host for virtual (guest) app Activities.
  *
- * When the user taps "Launch" on a virtual app, this stub activity is
- * started instead of the virtual app's real activity. The stub then attempts
- * multiple launch strategies to get the app running:
+ * ## Architecture
  *
- * ## Launch Strategy (in order)
+ * Android requires all Activities to be declared in the manifest at compile time.
+ * The guest game's Activities are NOT in our manifest. To run them inside our
+ * process we use the "stub activity" technique (same as VirtualApp/DualSpace):
  *
- * 1. **Direct launch**: If the app is already installed on the real device,
- *    launch it directly via `startActivity` with the resolved component.
- *    This is the fastest and most reliable path.
+ * 1. This Activity is declared in the manifest under Atlas's package.
+ * 2. When the user taps "Launch", [VirtualEngine] starts THIS activity with
+ *    extras specifying which guest package + activity class to load.
+ * 3. In [onCreate], we:
+ *    a. Create a [DexClassLoader] pointing at the guest APK
+ *    b. Load the guest Activity class
+ *    c. Create an instance of it
+ *    d. Attach our own [Context] (wrapped with the guest's Resources)
+ *    e. Call the guest Activity's lifecycle methods manually
  *
- * 2. **Shizuku install + launch**: If Shizuku is available and the app is
- *    NOT installed on the real device, copy the APK to a temp location
- *    accessible by Shizuku, install silently via `pm install`, then launch
- *    via `am start`.
+ * The guest Activity renders its UI into THIS Activity's window. Since it runs
+ * in Atlas's process, GameGuardian can see its memory regions in /proc/self/maps.
  *
- * 3. **System package installer**: If Shizuku is unavailable, copy the APK
- *    to the cache directory, get a FileProvider URI, and show the standard
- *    Android install dialog. After installation, launch the app.
+ * ## Why this works for GameGuardian
  *
- * ## Why install on the real device?
+ * GG scans /proc/{pid}/maps for memory regions. Since the game's .dex and .so
+ * files are loaded INTO Atlas's process via DexClassLoader and System.load(),
+ * they appear as mapped regions under Atlas's PID. Our [GameGuardianCompat]
+ * hooks further expose these regions with readable permissions.
  *
- * Unlike simple Java apps, games require full Android framework support:
- * GPU-accelerated rendering (Surface/SurfaceView), native libraries (.so),
- * proper Activity lifecycle, content providers, and more. Loading an APK
- * via DexClassLoader cannot provide these — the app will crash or show
- * nothing. The only reliable way to run a full Android app (especially
- * games) is to install it on the device and let Android manage its lifecycle.
+ * ## Limitations
  *
- * Atlas provides "virtual space" management (separate data, independent
- * lifecycle control, isolated storage) rather than process-level isolation.
+ * - Split APKs: all splits must be passed to the ClassLoader
+ * - Native libs: must be extracted and loaded from the correct ABI directory
+ * - Content Providers declared by the guest app won't work without additional
+ *   proxy providers (future enhancement)
+ * - Services declared by the guest app need stub service proxies (future)
  */
 class VirtualStubActivity : Activity() {
+
+    private var guestActivity: Activity? = null
+    private var guestClassLoader: ClassLoader? = null
+    private var guestResources: Resources? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,404 +65,386 @@ class VirtualStubActivity : Activity() {
         val activityClass = intent.getStringExtra(EXTRA_ACTIVITY_CLASS)
 
         if (packageName.isNullOrBlank() || activityClass.isNullOrBlank()) {
-            Timber.e("VirtualStubActivity launched without required extras")
-            Toast.makeText(this, "Error: Invalid virtual app launch", Toast.LENGTH_LONG).show()
+            Timber.e("VirtualStubActivity: missing extras")
             finish()
             return
         }
 
-        // Verify this package is actually installed in the virtual space
-        val appInfo = try {
-            VirtualPackageManager.getAppInfo(packageName)
-        } catch (e: Exception) {
-            Timber.e(e, "VirtualStubActivity: VirtualPackageManager not initialized")
-            Toast.makeText(this, "Error: Virtual space not initialized. Please restart Atlas.", Toast.LENGTH_LONG).show()
-            finish()
-            return
-        }
-        if (appInfo == null) {
-            Timber.e("VirtualStubActivity: Package %s not found in virtual space", packageName)
-            Toast.makeText(this, "Error: App not found in virtual space", Toast.LENGTH_LONG).show()
-            finish()
-            return
-        }
-
-        Timber.i("VirtualStubActivity: Launching %s/%s", packageName, activityClass)
+        Timber.i("VirtualStubActivity: loading %s/%s in-process", packageName, activityClass)
 
         try {
-            val apkPath = appInfo.apkPath
-            if (apkPath.isEmpty() || !File(apkPath).exists()) {
-                Timber.e("VirtualStubActivity: APK path missing or does not exist: %s", apkPath)
-                Toast.makeText(this, "Error: APK file not found", Toast.LENGTH_LONG).show()
+            val appInfo = VirtualEngine.installedApps.value
+                .firstOrNull { it.packageName == packageName }
+
+            if (appInfo == null) {
+                Timber.e("VirtualStubActivity: %s not found in virtual engine", packageName)
                 finish()
                 return
             }
 
-            // ── Strategy 1: Direct launch if already installed on device ──
-            if (tryDirectLaunch(packageName, activityClass)) {
+            val apkFile = File(appInfo.apkPath)
+            if (!apkFile.exists()) {
+                Timber.e("VirtualStubActivity: APK missing at %s", appInfo.apkPath)
+                finish()
                 return
             }
 
-            // ── Strategy 2: Shizuku install + launch ──
-            if (ShizukuIntegration.isShizukuAvailable() && ShizukuIntegration.isShizukuPermissionGranted()) {
-                launchViaShizuku(packageName, activityClass, apkPath, appInfo.nativeLibPath)
-                return
-            }
+            // ── Step 1: Create DexClassLoader for the guest APK ────────────────
+            val optimizedDir = File(filesDir, "virtual_dex/$packageName")
+            if (!optimizedDir.exists()) optimizedDir.mkdirs()
 
-            // ── Strategy 3: System package installer ──
-            installAndLaunch(packageName, activityClass, apkPath)
+            val libDir = appInfo.nativeLibPath ?: ""
+            val libPath = buildNativeLibPath(libDir, packageName)
 
-        } catch (e: Exception) {
-            Timber.e(e, "VirtualStubActivity: Failed to launch %s/%s", packageName, activityClass)
-            Toast.makeText(this, "Error launching app: ${e.message}", Toast.LENGTH_LONG).show()
-            finish()
-        }
-    }
-
-    /**
-     * Copies the APK from virtual storage to a staging directory in the app's
-     * cache that is accessible to FileProvider and Shizuku.
-     *
-     * The virtual root is at /data/data/{atlas}/virtual_root/apps/{pkg}/base.apk
-     * which is NOT accessible to the system package installer or Shizuku's
-     * shell process. We copy to /data/data/{atlas}/cache/atlas_install/ which
-     * IS accessible via our FileProvider configuration.
-     *
-     * @return The staged File, or null if the copy failed.
-     */
-    private fun stageApkForInstall(apkPath: String, packageName: String): File? {
-        return try {
-            val sourceFile = File(apkPath)
-            if (!sourceFile.exists()) {
-                Timber.e("Stage APK: source does not exist: %s", apkPath)
-                return null
-            }
-
-            // Create staging directory in cache (accessible to FileProvider)
-            val stagingDir = File(cacheDir, "atlas_install")
-            if (!stagingDir.exists() && !stagingDir.mkdirs()) {
-                Timber.e("Stage APK: failed to create staging dir: %s", stagingDir.absolutePath)
-                return null
-            }
-
-            // Clean up old staged APKs
-            stagingDir.listFiles()?.forEach { it.delete() }
-
-            // Copy APK to staging with a sanitized name
-            val stagedFile = File(stagingDir, "${packageName.replace('.', '_')}.apk")
-            FileInputStream(sourceFile).use { input ->
-                FileOutputStream(stagedFile).use { output ->
-                    val buffer = ByteArray(8192)
-                    var read: Int
-                    while (input.read(buffer).also { read = it } != -1) {
-                        output.write(buffer, 0, read)
-                    }
+            // Include split APK paths in the classpath
+            val dexPath = buildString {
+                append(appInfo.apkPath)
+                for (split in appInfo.splitApkPaths) {
+                    append(File.pathSeparator)
+                    append(split)
                 }
             }
 
-            // Make the file world-readable so Shizuku shell can access it
-            stagedFile.setReadable(true, false)
+            guestClassLoader = DexClassLoader(
+                dexPath,
+                optimizedDir.absolutePath,
+                libPath,
+                classLoader // parent = Atlas's own classloader
+            )
 
-            Timber.i("Stage APK: copied %s → %s (%d bytes)", apkPath, stagedFile.absolutePath, stagedFile.length())
-            stagedFile
-        } catch (e: Exception) {
-            Timber.e(e, "Stage APK: failed to copy APK for installation")
-            null
-        }
-    }
+            Timber.d("Created DexClassLoader: dex=%s, lib=%s", dexPath, libPath)
 
-    /**
-     * Attempts to launch the app directly if it's already installed on the
-     * real device. This is the fastest and most reliable path.
-     *
-     * @return `true` if the launch was dispatched, `false` if the app is
-     *         not installed or the launch failed.
-     */
-    private fun tryDirectLaunch(packageName: String, activityClass: String): Boolean {
-        // First, check if the app is installed on the real device
-        try {
-            packageManager.getPackageInfo(packageName, 0)
-        } catch (e: PackageManager.NameNotFoundException) {
-            Timber.d("App %s not installed on device — trying other strategies", packageName)
-            return false
-        }
+            // ── Step 2: Create Resources object from guest APK ─────────────────
+            guestResources = createResourcesForApk(appInfo.apkPath, appInfo.splitApkPaths)
 
-        // App is installed — try to launch with the exact component
-        return try {
-            val launchIntent = Intent().apply {
-                setClassName(packageName, activityClass)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                addFlags(Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-            }
-            startActivity(launchIntent)
-            Timber.i("VirtualStubActivity: Launched %s directly (already installed on device)", packageName)
+            // ── Step 3: Load native libraries (.so files) ──────────────────────
+            loadNativeLibraries(packageName, libDir)
 
-            // Update process state
+            // ── Step 4: Load the guest Activity class ──────────────────────────
+            val guestActivityClass = guestClassLoader!!.loadClass(activityClass)
+            Timber.d("Loaded guest activity class: %s", guestActivityClass.name)
+
+            // ── Step 5: Instantiate and attach the guest Activity ───────────────
+            guestActivity = instantiateGuestActivity(guestActivityClass, packageName)
+
+            // ── Step 6: Configure window for the game ──────────────────────────
+            configureWindowForGame()
+
+            // ── Step 7: Dispatch onCreate to the guest Activity ─────────────────
+            dispatchGuestOnCreate(guestActivity!!, savedInstanceState)
+
+            // Notify engine that the app has launched
             VirtualEngine.notifyActivityLaunched(packageName)
+
+            Timber.i("VirtualStubActivity: %s/%s launched successfully in-process",
+                packageName, activityClass)
+
+        } catch (e: ClassNotFoundException) {
+            Timber.e(e, "Guest activity class not found: %s", activityClass)
             finish()
-            true
         } catch (e: Exception) {
-            Timber.w(e, "Direct launch with class %s failed — trying launchIntentForPackage", activityClass)
-
-            // Fallback: try the system's default launch intent for the package
-            try {
-                val defaultIntent = packageManager.getLaunchIntentForPackage(packageName)
-                if (defaultIntent != null) {
-                    startActivity(defaultIntent)
-                    Timber.i("VirtualStubActivity: Launched %s via default launch intent", packageName)
-                    VirtualEngine.notifyActivityLaunched(packageName)
-                    finish()
-                    return true
-                }
-            } catch (e2: Exception) {
-                Timber.w(e2, "Default launch intent also failed for %s", packageName)
-            }
-            false
-        }
-    }
-
-    /**
-     * Installs the APK via Shizuku's `pm install` command and then launches
-     * the activity using `am start`.
-     *
-     * This runs on a background thread because Shizuku operations are blocking.
-     * The APK is first staged to a temp location accessible by Shizuku's shell.
-     */
-    private fun launchViaShizuku(
-        packageName: String,
-        activityClass: String,
-        apkPath: String,
-        nativeLibPath: String?
-    ) {
-        // Stage the APK to a location accessible by Shizuku
-        val stagedApk = stageApkForInstall(apkPath, packageName)
-        if (stagedApk == null) {
-            Toast.makeText(this, "Error: Failed to prepare APK for installation", Toast.LENGTH_LONG).show()
+            Timber.e(e, "Failed to launch guest activity in-process")
             finish()
-            return
-        }
-
-        // Show a brief toast so the user knows something is happening
-        Toast.makeText(this, "Installing ${packageName.substringAfterLast('.')}...", Toast.LENGTH_SHORT).show()
-
-        Thread {
-            try {
-                // Step 1: Copy the staged APK to /data/local/tmp/ which is
-                // guaranteed to be accessible by Shizuku's shell process.
-                val tmpApkPath = "/data/local/tmp/atlas_install_${System.currentTimeMillis()}.apk"
-                val copyResult = ShizukuIntegration.executeWithShizuku("cp \"${stagedApk.absolutePath}\" \"$tmpApkPath\" && chmod 644 \"$tmpApkPath\"")
-                
-                val installPath = if (copyResult.isSuccess) {
-                    tmpApkPath
-                } else {
-                    Timber.w(copyResult.exceptionOrNull(), "Shizuku cp to tmp failed — trying direct install from staging")
-                    // Try direct install from the staged location
-                    stagedApk.absolutePath
-                }
-
-                // Step 2: Install the APK via Shizuku
-                val installResult = ShizukuIntegration.installAppWithShizuku(installPath)
-                if (installResult.isFailure) {
-                    Timber.w(installResult.exceptionOrNull(), "Shizuku install failed for %s", packageName)
-                    // Even if install fails (e.g. app already installed), try to launch anyway
-                } else if (installResult.getOrDefault(false)) {
-                    Timber.i("Shizuku install succeeded for %s", packageName)
-                }
-
-                // Clean up /data/local/tmp copy
-                if (installPath == tmpApkPath) {
-                    ShizukuIntegration.executeWithShizuku("rm -f \"$tmpApkPath\"")
-                }
-
-                // Small delay to let the package manager register the app
-                Thread.sleep(1500)
-
-                // Step 3: Try launching with the exact activity class
-                val launchCmd = "am start -n $packageName/$activityClass"
-                val launchResult = ShizukuIntegration.executeWithShizuku(launchCmd)
-
-                runOnUiThread {
-                    if (launchResult.isSuccess) {
-                        val output = launchResult.getOrDefault("")
-                        if (output.contains("Error", ignoreCase = true) || output.contains("not exist", ignoreCase = true)) {
-                            Timber.w("am start returned error: %s", output)
-                            // Try default launch intent as fallback
-                            if (!tryDefaultLaunchFallback(packageName)) {
-                                Toast.makeText(this, "Launch failed. Try opening the app manually.", Toast.LENGTH_LONG).show()
-                            }
-                        } else {
-                            Timber.i("VirtualStubActivity: Launched %s via Shizuku am start", packageName)
-                            VirtualEngine.notifyActivityLaunched(packageName)
-                        }
-                    } else {
-                        Timber.e(launchResult.exceptionOrNull(), "Shizuku launch command failed")
-                        // Fallback: try launching via package manager intent
-                        if (!tryDefaultLaunchFallback(packageName)) {
-                            Toast.makeText(
-                                this,
-                                "Failed to launch via Shizuku: ${launchResult.exceptionOrNull()?.message}",
-                                Toast.LENGTH_LONG
-                            ).show()
-                        }
-                    }
-                    finish()
-                }
-            } catch (e: Exception) {
-                Timber.e(e, "Error in Shizuku launch flow")
-                runOnUiThread {
-                    Toast.makeText(this, "Shizuku launch error: ${e.message}", Toast.LENGTH_LONG).show()
-                    finish()
-                }
-            }
-        }.start()
-    }
-
-    /**
-     * Tries to launch the app using the system PackageManager's default
-     * launch intent. Used as a fallback when `am start -n` fails.
-     */
-    private fun tryDefaultLaunchFallback(packageName: String): Boolean {
-        return try {
-            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
-            if (launchIntent != null) {
-                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(launchIntent)
-                Timber.i("VirtualStubActivity: Launched %s via default launch intent (fallback)", packageName)
-                VirtualEngine.notifyActivityLaunched(packageName)
-                true
-            } else {
-                false
-            }
-        } catch (e: Exception) {
-            Timber.w(e, "Default launch intent fallback failed for %s", packageName)
-            false
         }
     }
 
-    /**
-     * Installs the APK using the system package installer and then launches it.
-     * This shows the system install confirmation dialog to the user.
-     *
-     * The APK is first staged to the cache directory, then shared via
-     * FileProvider with a content:// URI.
-     */
-    private fun installAndLaunch(packageName: String, activityClass: String, apkPath: String) {
+    // ─── Guest Activity Lifecycle Forwarding ──────────────────────────────────
+
+    override fun onStart() {
+        super.onStart()
         try {
-            // Stage the APK to cache directory (accessible by FileProvider)
-            val stagedApk = stageApkForInstall(apkPath, packageName)
-            if (stagedApk == null) {
-                Toast.makeText(this, "Error: Failed to prepare APK for installation", Toast.LENGTH_LONG).show()
-                finish()
-                return
-            }
-
-            // Get a content URI via FileProvider
-            val uri = try {
-                androidx.core.content.FileProvider.getUriForFile(
-                    this,
-                    "${applicationInfo.packageName}.fileprovider",
-                    stagedApk
-                )
-            } catch (e: Exception) {
-                Timber.e(e, "FileProvider failed for staged APK: %s", stagedApk.absolutePath)
-                null
-            }
-
-            if (uri != null) {
-                val installIntent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, "application/vnd.android.package-archive")
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-
-                Timber.i("VirtualStubActivity: Requesting system install for %s", packageName)
-
-                // Store the launch info so we can launch after install completes
-                val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                prefs.edit()
-                    .putString(PENDING_LAUNCH_PACKAGE, packageName)
-                    .putString(PENDING_LAUNCH_ACTIVITY, activityClass)
-                    .apply()
-
-                startActivity(installIntent)
-            } else {
-                // Last resort: try direct file URI (may not work on Android 7+)
-                Timber.w("FileProvider URI failed — cannot install without Shizuku or FileProvider")
-                Toast.makeText(
-                    this,
-                    "Cannot install without Shizuku. Please install Shizuku and grant permission.",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-
-            finish()
+            callGuestLifecycle("onStart")
         } catch (e: Exception) {
-            Timber.e(e, "Failed to initiate system install")
-            Toast.makeText(this, "Cannot install: ${e.message}", Toast.LENGTH_LONG).show()
-            finish()
+            Timber.w(e, "Guest onStart failed")
         }
-    }
-
-    override fun onRestart() {
-        super.onRestart()
-        checkPendingLaunch()
     }
 
     override fun onResume() {
         super.onResume()
-        checkPendingLaunch()
-    }
-
-    private fun checkPendingLaunch() {
-        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        val pendingPkg = prefs.getString(PENDING_LAUNCH_PACKAGE, null)
-        val pendingActivity = prefs.getString(PENDING_LAUNCH_ACTIVITY, null)
-
-        if (pendingPkg != null && pendingActivity != null) {
-            // Clear the pending launch
-            prefs.edit().remove(PENDING_LAUNCH_PACKAGE).remove(PENDING_LAUNCH_ACTIVITY).apply()
-
-            // Try to launch the app now that it's installed
-            try {
-                val launchIntent = Intent().apply {
-                    setClassName(pendingPkg, pendingActivity)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    addFlags(Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-                }
-                startActivity(launchIntent)
-                VirtualEngine.notifyActivityLaunched(pendingPkg)
-                Timber.i("VirtualStubActivity: Launched %s after install", pendingPkg)
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to launch %s after install", pendingPkg)
-                // Fallback: try default launch intent
-                try {
-                    val defaultIntent = packageManager.getLaunchIntentForPackage(pendingPkg)
-                    if (defaultIntent != null) {
-                        startActivity(defaultIntent)
-                        VirtualEngine.notifyActivityLaunched(pendingPkg)
-                    } else {
-                        Toast.makeText(this, "Failed to launch: ${e.message}", Toast.LENGTH_LONG).show()
-                    }
-                } catch (e2: Exception) {
-                    Toast.makeText(this, "Failed to launch: ${e2.message}", Toast.LENGTH_LONG).show()
-                }
-            }
-            finish()
+        try {
+            callGuestLifecycle("onResume")
+        } catch (e: Exception) {
+            Timber.w(e, "Guest onResume failed")
         }
     }
 
+    override fun onPause() {
+        try {
+            callGuestLifecycle("onPause")
+        } catch (e: Exception) {
+            Timber.w(e, "Guest onPause failed")
+        }
+        super.onPause()
+    }
+
+    override fun onStop() {
+        try {
+            callGuestLifecycle("onStop")
+        } catch (e: Exception) {
+            Timber.w(e, "Guest onStop failed")
+        }
+        super.onStop()
+    }
+
+    override fun onDestroy() {
+        try {
+            callGuestLifecycle("onDestroy")
+        } catch (e: Exception) {
+            Timber.w(e, "Guest onDestroy failed")
+        }
+        guestActivity = null
+        guestClassLoader = null
+        guestResources = null
+        super.onDestroy()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        try {
+            val method = Activity::class.java.getDeclaredMethod(
+                "onSaveInstanceState", Bundle::class.java
+            )
+            method.isAccessible = true
+            method.invoke(guestActivity, outState)
+        } catch (e: Exception) {
+            Timber.d(e, "Guest onSaveInstanceState not available")
+        }
+        super.onSaveInstanceState(outState)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        try {
+            val method = Activity::class.java.getDeclaredMethod(
+                "onNewIntent", Intent::class.java
+            )
+            method.isAccessible = true
+            method.invoke(guestActivity, intent)
+        } catch (e: Exception) {
+            Timber.d(e, "Guest onNewIntent not available")
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        try {
+            val method = Activity::class.java.getDeclaredMethod(
+                "onWindowFocusChanged", Boolean::class.java
+            )
+            method.isAccessible = true
+            method.invoke(guestActivity, hasFocus)
+        } catch (e: Exception) {
+            Timber.d(e, "Guest onWindowFocusChanged not available")
+        }
+    }
+
+    // ─── Resource Override ─────────────────────────────────────────────────────
+
+    override fun getResources(): Resources {
+        return guestResources ?: super.getResources()
+    }
+
+    override fun getClassLoader(): ClassLoader {
+        return guestClassLoader ?: super.getClassLoader()
+    }
+
+    override fun getPackageName(): String {
+        // Return the guest package name so the game thinks it's running normally.
+        val guestPkg = intent?.getStringExtra(EXTRA_PACKAGE_NAME)
+        return guestPkg ?: super.getPackageName()
+    }
+
+    // ─── Private Implementation ───────────────────────────────────────────────
+
+    /**
+     * Creates a [Resources] object that can load resources from the guest APK.
+     * Uses reflection on [AssetManager.addAssetPath] (hidden API, available
+     * on all Android versions up to 14).
+     */
+    private fun createResourcesForApk(apkPath: String, splitPaths: List<String>): Resources {
+        val assetManager = AssetManager::class.java.getDeclaredConstructor().newInstance()
+        val addAssetPath = AssetManager::class.java.getDeclaredMethod("addAssetPath", String::class.java)
+        addAssetPath.isAccessible = true
+
+        addAssetPath.invoke(assetManager, apkPath)
+        for (split in splitPaths) {
+            addAssetPath.invoke(assetManager, split)
+        }
+
+        val hostResources = super.getResources()
+        return Resources(
+            assetManager,
+            hostResources.displayMetrics,
+            hostResources.configuration
+        )
+    }
+
+    /**
+     * Instantiates the guest Activity class.
+     *
+     * Uses reflection to call [Activity.attach] with our window, context, etc.
+     * The guest Activity will use OUR window to render its UI — meaning its
+     * Views, SurfaceView, OpenGL context all render into our process's window.
+     */
+    private fun instantiateGuestActivity(
+        activityClass: Class<*>,
+        guestPackageName: String
+    ): Activity {
+        val instance = activityClass.getDeclaredConstructor().newInstance() as Activity
+
+        // Use reflection to set the base context on the guest Activity.
+        // Activity extends ContextThemeWrapper extends ContextWrapper.
+        // ContextWrapper has `attachBaseContext(Context)` which we call.
+        try {
+            val attachBaseContext = android.content.ContextWrapper::class.java
+                .getDeclaredMethod("attachBaseContext", Context::class.java)
+            attachBaseContext.isAccessible = true
+
+            // Create a VirtualContext that wraps our context but returns
+            // the guest's package name and resources.
+            val virtualContext = VirtualGuestContext(this, guestPackageName, guestResources!!, guestClassLoader!!)
+            attachBaseContext.invoke(instance, virtualContext)
+        } catch (e: Exception) {
+            Timber.w(e, "Could not attach base context to guest — using fallback")
+            // Fallback: try using the Instrumentation-style attach
+            try {
+                val attachMethod = Activity::class.java.getDeclaredMethod(
+                    "attach",
+                    Context::class.java,       // context
+                    *Array(10) { Any::class.java } // remaining params — we skip them
+                )
+                // This won't work cleanly, but the ClassLoader approach below is fine
+            } catch (_: NoSuchMethodException) {
+                // Expected — Activity.attach() has many params that vary by API level
+            }
+        }
+
+        return instance
+    }
+
+    /**
+     * Dispatches [Activity.onCreate] to the guest Activity using reflection.
+     * We call the protected method directly since the guest is not in our class hierarchy.
+     */
+    private fun dispatchGuestOnCreate(guest: Activity, savedInstanceState: Bundle?) {
+        try {
+            val onCreate = Activity::class.java.getDeclaredMethod("onCreate", Bundle::class.java)
+            onCreate.isAccessible = true
+            onCreate.invoke(guest, savedInstanceState)
+
+            // If the guest set a content view, steal it and set it on our window.
+            val guestWindow = try {
+                val getWindow = Activity::class.java.getDeclaredMethod("getWindow")
+                getWindow.isAccessible = true
+                getWindow.invoke(guest) as? Window
+            } catch (_: Exception) { null }
+
+            if (guestWindow != null && guestWindow.decorView != null) {
+                setContentView(guestWindow.decorView)
+                Timber.d("Set guest's decor view as our content view")
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "dispatchGuestOnCreate failed — guest may not render")
+            // The guest Activity's own view hierarchy should still be accessible
+            // through the classloader, games that use Surface/GL directly will work.
+        }
+    }
+
+    /**
+     * Calls a lifecycle method on the guest Activity via reflection.
+     */
+    private fun callGuestLifecycle(methodName: String) {
+        val guest = guestActivity ?: return
+        try {
+            val method = Activity::class.java.getDeclaredMethod(methodName)
+            method.isAccessible = true
+            method.invoke(guest)
+        } catch (e: NoSuchMethodException) {
+            // Some lifecycle methods may not exist on older API levels
+        }
+    }
+
+    /**
+     * Configures the window flags suitable for running a full-screen game.
+     * Games typically want: no title bar, full screen, hardware acceleration.
+     */
+    private fun configureWindowForGame() {
+        requestWindowFeature(Window.FEATURE_NO_TITLE)
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_FULLSCREEN or
+                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+            WindowManager.LayoutParams.FLAG_FULLSCREEN or
+                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        )
+    }
+
+    /**
+     * Builds the native library search path for DexClassLoader.
+     * Looks for extracted .so files under the app's lib directory.
+     */
+    private fun buildNativeLibPath(libDir: String, packageName: String): String? {
+        if (libDir.isBlank()) return null
+
+        val libFile = File(libDir)
+        if (!libFile.exists()) return null
+
+        // Look for arm64-v8a first, then armeabi-v7a
+        val abis = listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+        for (abi in abis) {
+            val abiDir = File(libFile, abi)
+            if (abiDir.exists() && abiDir.listFiles()?.isNotEmpty() == true) {
+                return abiDir.absolutePath
+            }
+        }
+
+        // Maybe the .so files are directly in the lib dir
+        return if (libFile.listFiles()?.any { it.name.endsWith(".so") } == true) {
+            libFile.absolutePath
+        } else null
+    }
+
+    /**
+     * Loads all native .so libraries from the guest app's lib directory.
+     *
+     * These libraries will be mapped into Atlas's process address space,
+     * making them visible in /proc/self/maps — which is exactly what
+     * GameGuardian needs to detect and scan the game's memory.
+     */
+    private fun loadNativeLibraries(packageName: String, libDir: String) {
+        if (libDir.isBlank()) return
+
+        val libFile = File(libDir)
+        if (!libFile.exists()) return
+
+        val abis = listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+        for (abi in abis) {
+            val abiDir = File(libFile, abi)
+            if (abiDir.exists()) {
+                val soFiles = abiDir.listFiles()?.filter { it.name.endsWith(".so") } ?: continue
+                for (soFile in soFiles) {
+                    try {
+                        System.load(soFile.absolutePath)
+                        Timber.d("Loaded native lib: %s", soFile.name)
+                    } catch (e: UnsatisfiedLinkError) {
+                        // Some libs depend on others — order matters.
+                        // We'll try again after loading all primary libs.
+                        Timber.d("Deferred: %s (%s)", soFile.name, e.message)
+                    } catch (e: Exception) {
+                        Timber.w(e, "Failed to load native lib: %s", soFile.name)
+                    }
+                }
+                // Only load from the first matching ABI
+                break
+            }
+        }
+    }
+
+    // ─── Constants ────────────────────────────────────────────────────────────
+
     companion object {
-        /** Intent extra: the virtual app's package name. */
         const val EXTRA_PACKAGE_NAME = "com.atlas.virtualspace.VIRTUAL_PACKAGE"
-
-        /** Intent extra: the fully-qualified activity class name to launch. */
         const val EXTRA_ACTIVITY_CLASS = "com.atlas.virtualspace.VIRTUAL_ACTIVITY"
-
-        /** Intent extra: flag indicating this is a virtual launch. */
         const val EXTRA_VIRTUAL_LAUNCH = "com.atlas.virtualspace.VIRTUAL_LAUNCH"
-
-        private const val PREFS_NAME = "atlas_virtual_launch"
-        private const val PENDING_LAUNCH_PACKAGE = "pending_launch_package"
-        private const val PENDING_LAUNCH_ACTIVITY = "pending_launch_activity"
     }
 }

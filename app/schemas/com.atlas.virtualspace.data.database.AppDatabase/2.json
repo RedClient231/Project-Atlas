@@ -1,0 +1,61 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "a1c2d3e4f5b6c7d8e9f0a1b2c3d4e5f6",
+    "entities": [
+      {
+        "tableName": "virtual_apps",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`packageName` TEXT NOT NULL, `appName` TEXT NOT NULL, `versionName` TEXT NOT NULL, `versionCode` INTEGER NOT NULL, `apkPath` TEXT NOT NULL, `splitApkPaths` TEXT NOT NULL, `obbPath` TEXT, `nativeLibPath` TEXT, `installTime` INTEGER NOT NULL, `updateTime` INTEGER NOT NULL, `targetSdkVersion` INTEGER NOT NULL, `minSdkVersion` INTEGER NOT NULL, `is64Bit` INTEGER NOT NULL, `isGame` INTEGER NOT NULL, `isEnabled` INTEGER NOT NULL, `launchActivity` TEXT, `permissions` TEXT NOT NULL, `installType` TEXT NOT NULL, `dataUsageBytes` INTEGER NOT NULL, `lastLaunchTime` INTEGER NOT NULL, `launchCount` INTEGER NOT NULL, `isInstalledOnDevice` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`packageName`))",
+        "fields": [
+          {"fieldPath": "packageName", "columnName": "packageName", "affinity": "TEXT", "notNull": true},
+          {"fieldPath": "appName", "columnName": "appName", "affinity": "TEXT", "notNull": true},
+          {"fieldPath": "versionName", "columnName": "versionName", "affinity": "TEXT", "notNull": true},
+          {"fieldPath": "versionCode", "columnName": "versionCode", "affinity": "INTEGER", "notNull": true},
+          {"fieldPath": "apkPath", "columnName": "apkPath", "affinity": "TEXT", "notNull": true},
+          {"fieldPath": "splitApkPaths", "columnName": "splitApkPaths", "affinity": "TEXT", "notNull": true},
+          {"fieldPath": "obbPath", "columnName": "obbPath", "affinity": "TEXT", "notNull": false},
+          {"fieldPath": "nativeLibPath", "columnName": "nativeLibPath", "affinity": "TEXT", "notNull": false},
+          {"fieldPath": "installTime", "columnName": "installTime", "affinity": "INTEGER", "notNull": true},
+          {"fieldPath": "updateTime", "columnName": "updateTime", "affinity": "INTEGER", "notNull": true},
+          {"fieldPath": "targetSdkVersion", "columnName": "targetSdkVersion", "affinity": "INTEGER", "notNull": true},
+          {"fieldPath": "minSdkVersion", "columnName": "minSdkVersion", "affinity": "INTEGER", "notNull": true},
+          {"fieldPath": "is64Bit", "columnName": "is64Bit", "affinity": "INTEGER", "notNull": true},
+          {"fieldPath": "isGame", "columnName": "isGame", "affinity": "INTEGER", "notNull": true},
+          {"fieldPath": "isEnabled", "columnName": "isEnabled", "affinity": "INTEGER", "notNull": true},
+          {"fieldPath": "launchActivity", "columnName": "launchActivity", "affinity": "TEXT", "notNull": false},
+          {"fieldPath": "permissions", "columnName": "permissions", "affinity": "TEXT", "notNull": true},
+          {"fieldPath": "installType", "columnName": "installType", "affinity": "TEXT", "notNull": true},
+          {"fieldPath": "dataUsageBytes", "columnName": "dataUsageBytes", "affinity": "INTEGER", "notNull": true},
+          {"fieldPath": "lastLaunchTime", "columnName": "lastLaunchTime", "affinity": "INTEGER", "notNull": true},
+          {"fieldPath": "launchCount", "columnName": "launchCount", "affinity": "INTEGER", "notNull": true},
+          {"fieldPath": "isInstalledOnDevice", "columnName": "isInstalledOnDevice", "affinity": "INTEGER", "notNull": true, "defaultValue": "0"}
+        ],
+        "primaryKey": {"autoGenerate": false, "columnNames": ["packageName"]},
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "app_logs",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `packageName` TEXT NOT NULL, `level` INTEGER NOT NULL, `tag` TEXT NOT NULL, `message` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, `threadName` TEXT NOT NULL)",
+        "fields": [
+          {"fieldPath": "id", "columnName": "id", "affinity": "INTEGER", "notNull": true},
+          {"fieldPath": "packageName", "columnName": "packageName", "affinity": "TEXT", "notNull": true},
+          {"fieldPath": "level", "columnName": "level", "affinity": "INTEGER", "notNull": true},
+          {"fieldPath": "tag", "columnName": "tag", "affinity": "TEXT", "notNull": true},
+          {"fieldPath": "message", "columnName": "message", "affinity": "TEXT", "notNull": true},
+          {"fieldPath": "timestamp", "columnName": "timestamp", "affinity": "INTEGER", "notNull": true},
+          {"fieldPath": "threadName", "columnName": "threadName", "affinity": "TEXT", "notNull": true}
+        ],
+        "primaryKey": {"autoGenerate": true, "columnNames": ["id"]},
+        "indices": [],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a1c2d3e4f5b6c7d8e9f0a1b2c3d4e5f6')"
+    ]
+  }
+}

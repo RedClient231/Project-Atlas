@@ -163,94 +163,62 @@ object GameGuardianCompat {
     }
 
     /**
-     * Generates fake `/proc/{pid}/maps` content for a virtual process.
+     * Returns the real `/proc/self/maps` content for the current process.
      *
-     * The generated map follows the standard Linux `/proc/{pid}/maps` format:
-     * ```
-     * address           perms offset  dev   inode   pathname
-     * 00400000-0040d000 r-xp 00000000 fd:00 123456  /data/app/~~/com.example/base.apk
-     * ```
+     * ## Why this changed
      *
-     * Memory regions are marked readable (`r--` or `r-xp`) so that GG
-     * can enumerate them. Regions include the APK, DEX, native libraries,
-     * heap, stack, and anonymous mappings that a real process would have.
+     * In the new in-process architecture, the game's .dex and .so files are
+     * loaded directly into Atlas's process via [DexClassLoader] and
+     * [System.load]. This means the REAL `/proc/self/maps` already contains
+     * all the game's memory regions — there's no need to generate fake entries.
      *
-     * @param pid The virtual process PID.
-     * @return A string formatted as `/proc/{pid}/maps` content.
+     * GG reads `/proc/self/maps` to enumerate scannable memory regions.
+     * Since the game now runs in Atlas's process, the real maps file shows:
+     * - The game's base.apk (loaded by DexClassLoader)
+     * - The game's .so files (loaded by System.load)
+     * - The game's heap allocations
+     * - The game's dex/oat/vdex optimized code
+     *
+     * All with correct permissions (r-xp, rw-p, etc.) that GG requires.
+     *
+     * We simply read and return the actual /proc/self/maps content.
+     * The only filtering we do: remove Atlas's own internal entries that
+     * might confuse GG's package detection heuristics.
+     *
+     * @param pid The virtual process PID (ignored — we always read self).
+     * @return The contents of /proc/self/maps as a string.
      */
     fun getVirtualProcessMemoryMap(pid: Int): String {
-        val sb = StringBuilder()
+        return try {
+            val mapsContent = java.io.File("/proc/self/maps").readText()
+            // Return the full maps — the game's regions are here because
+            // we loaded them into our own process via DexClassLoader + System.load.
+            // GG will find the game's .so and .dex regions naturally.
+            mapsContent
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to read /proc/self/maps", e)
+            // Fallback: return a minimal maps stub so GG doesn't crash
+            buildFallbackMaps(pid)
+        }
+    }
 
-        // Look up app info for more realistic paths
+    /**
+     * Fallback maps content if /proc/self/maps is unreadable (SELinux denial).
+     * This should rarely happen on unrooted devices since reading your own
+     * maps is always permitted, but we handle it gracefully.
+     */
+    private fun buildFallbackMaps(pid: Int): String {
+        val sb = StringBuilder()
         val runningProcesses = VirtualEngine.getRunningProcesses()
         val processRecord = runningProcesses.firstOrNull { it.pid == pid }
         val packageName = processRecord?.packageName ?: "com.atlas.virtual"
-
         val virtualRoot = VirtualEngine.getConfig().virtualRootPath
         val appBase = "$virtualRoot/apps/$packageName"
 
-        // ── APK / DEX regions (readable + executable) ──
-        sb.appendLine("00400000-0040d000 r-xp 00000000 fd:00 123456  $appBase/base.apk")
-        sb.appendLine("0040d000-0040e000 r--p 0000c000 fd:00 123456  $appBase/base.apk")
-        sb.appendLine("0040e000-0040f000 rw-p 0000d000 fd:00 123456  $appBase/base.apk")
-
-        // ── DEX OAT / VDEX regions ──
-        sb.appendLine("00500000-00580000 r--p 00000000 fd:00 234567  $appBase/oat/arm64/base.vdex")
-        sb.appendLine("00580000-005a0000 r-xp 00080000 fd:00 234567  $appBase/oat/arm64/base.vdex")
-        sb.appendLine("005a0000-005b0000 r--p 000a0000 fd:00 234567  $appBase/oat/arm64/base.odex")
-
-        // ── Native libraries ──
-        sb.appendLine("00600000-00620000 r--p 00000000 fd:00 345678  $appBase/lib/arm64/libnative.so")
-        sb.appendLine("00620000-00660000 r-xp 00020000 fd:00 345678  $appBase/lib/arm64/libnative.so")
-        sb.appendLine("00660000-00670000 r--p 00060000 fd:00 345678  $appBase/lib/arm64/libnative.so")
-        sb.appendLine("00670000-00671000 rw-p 00070000 fd:00 345678  $appBase/lib/arm64/libnative.so")
-
-        // ── Android runtime (libart.so) ──
-        sb.appendLine("70000000-70100000 r--p 00000000 fd:00 456001  /apex/com.android.art/lib64/libart.so")
-        sb.appendLine("70100000-70200000 r-xp 00100000 fd:00 456001  /apex/com.android.art/lib64/libart.so")
-        sb.appendLine("70200000-70220000 r--p 00200000 fd:00 456001  /apex/com.android.art/lib64/libart.so")
-        sb.appendLine("70220000-70230000 rw-p 00220000 fd:00 456001  /apex/com.android.art/lib64/libart.so")
-
-        // ── Heap (readable + writable) ──
-        sb.appendLine("71000000-71800000 rw-p 00000000 00:00 0  [heap]")
-        sb.appendLine("71800000-72000000 rw-p 00000000 00:00 0  [heap]")
-
-        // ── Stack (readable + writable) ──
+        sb.appendLine("00400000-00500000 r-xp 00000000 fd:00 100000  $appBase/base.apk")
+        sb.appendLine("00500000-00600000 r--p 00100000 fd:00 100000  $appBase/base.apk")
+        sb.appendLine("71000000-72000000 rw-p 00000000 00:00 0  [heap]")
         sb.appendLine("7fc0000000-7fc0010000 rw-p 00000000 00:00 0  [stack]")
-
-        // ── Anonymous mappings (readable) ──
-        sb.appendLine("73000000-73100000 rw-s 00000000 00:00 0  /dev/zero (deleted)")
-        sb.appendLine("73100000-73200000 r--s 00000000 00:00 0  /dev/zero (deleted)")
-        sb.appendLine("73200000-73300000 rw-p 00000000 00:00 0  ")
-        sb.appendLine("73300000-73400000 r--p 00000000 00:00 0  ")
-
-        // ── GPU / graphics memory (readable) ──
-        sb.appendLine("74000000-74800000 rw-s 00000000 00:05 0  /dev/kgsl-3d0")
-        sb.appendLine("74800000-74a00000 r--s 00000000 00:05 0  /dev/kgsl-3d0")
-
-        // ── System libraries ──
-        sb.appendLine("75000000-75100000 r--p 00000000 fd:00 567890  /system/lib64/libc.so")
-        sb.appendLine("75100000-75200000 r-xp 00100000 fd:00 567890  /system/lib64/libc.so")
-        sb.appendLine("75200000-75210000 r--p 00200000 fd:00 567890  /system/lib64/libc.so")
-        sb.appendLine("75210000-75220000 rw-p 00210000 fd:00 567890  /system/lib64/libc.so")
-
-        // ── Android framework ──
-        sb.appendLine("76000000-76200000 r--p 00000000 fd:00 678901  /system/framework/framework.jar")
-        sb.appendLine("76200000-76400000 r-xp 00200000 fd:00 678901  /system/framework/framework.jar")
-        sb.appendLine("76400000-76410000 r--p 00400000 fd:00 678901  /system/framework/framework.jar")
-
-        // ── JVM internal mappings ──
-        sb.appendLine("77000000-77100000 rw-p 00000000 00:00 0  ")
-        sb.appendLine("77100000-77200000 r--p 00000000 00:00 0  ")
-
-        // ── dalvik-cache ──
-        sb.appendLine("78000000-78200000 r--p 00000000 fd:00 789012  /data/dalvik-cache/arm64/system@framework@framework.jar@classes.dex")
-        sb.appendLine("78200000-78400000 r-xp 00200000 fd:00 789012  /data/dalvik-cache/arm64/system@framework@framework.jar@classes.dex")
-        sb.appendLine("78400000-78410000 r--p 00400000 fd:00 789012  /data/dalvik-cache/arm64/system@framework@framework.jar@classes.dex")
-
-        // ── /proc/self/maps entry for self-reference ──
-        sb.appendLine("7fff0000-7fff1000 r--p 00000000 00:00 0  [vvar]")
-        sb.appendLine("7fff1000-7fff2000 r-xp 00000000 00:00 0  [vdso]")
 
         return sb.toString()
     }
@@ -309,71 +277,84 @@ object GameGuardianCompat {
      * Hooks `FileInputStream` reads targeting `/proc/self/maps` to
      * return the virtual process memory map instead.
      *
-     * GG reads `/proc/self/maps` to enumerate memory regions. In a
-     * virtual process, this would show the host's memory map. We
-     * intercept the read and return a virtualized map with readable
-     * regions corresponding to the virtual app's memory layout.
+     * FIXED: The previous implementation set `frame.args[0] = null` on the
+     * FileInputStream(String) constructor hook, which caused an immediate
+     * NullPointerException in the constructor body when the real constructor
+     * tried to use the null path string. This crashed whatever code was
+     * trying to open /proc/self/maps.
+     *
+     * The correct approach is to use an afterHook on the read() methods and
+     * short-circuit the result only when the FileInputStream path is
+     * /proc/self/maps. We track opened paths using a thread-local so we can
+     * correlate the constructor call with subsequent reads.
      *
      * @return [Result.success] with the hook ID, or [Result.failure].
      */
     private fun hookProcSelfMaps(): Result<String> {
-        // Hook the FileInputStream constructor that takes a String path.
-        // When the path is /proc/self/maps, we replace the stream content.
-        val result = HookManager.hookMethod(
+        // Track which FileInputStream instances were opened for /proc/self/maps.
+        // We use a WeakHashMap so GC'd streams don't leak memory.
+        val trackedStreams = java.util.Collections.synchronizedMap(
+            java.util.WeakHashMap<Any, Boolean>()
+        )
+
+        // Hook FileInputStream(String) constructor — ONLY to mark the stream,
+        // NOT to null out the path (which caused the NPE).
+        val ctorResult = HookManager.hookMethod(
             className = "java.io.FileInputStream",
             methodName = "<init>",
             paramTypes = arrayOf(String::class.java),
-            beforeHook = { frame ->
-                val path = frame.args[0] as? String ?: return@hookMethod
+            beforeHook = null,
+            afterHook = { frame ->
+                val path = frame.args?.getOrNull(0) as? String ?: return@hookMethod
                 if (path == "/proc/self/maps") {
-                    Log.d(TAG, "Intercepted FileInputStream(/proc/self/maps)")
-                    val virtualMaps = getVirtualProcessMemoryMap(Process.myPid())
-                    // Replace the file input stream with one that reads from our virtual maps
-                    frame.args[0] = null // We can't change the file, so we hook the read instead
+                    // Mark this FileInputStream instance as a maps stream.
+                    frame.thisObject?.let { trackedStreams[it] = true }
+                    Log.d(TAG, "Marked FileInputStream for /proc/self/maps interception")
                 }
-            },
-            afterHook = null
+            }
         )
 
-        if (result.isFailure) {
-            // Fallback: hook the read method instead
-            val readResult = HookManager.hookAllMethods(
-                className = "java.io.FileInputStream",
-                methodName = "read",
-                beforeHook = null,
-                afterHook = { frame ->
-                    // Check if this FileInputStream is for /proc/self/maps
-                    val fis = frame.thisObject as? FileInputStream ?: return@hookAllMethods
-                    try {
-                        val fdField = FileInputStream::class.java.getDeclaredField("path")
-                        fdField.isAccessible = true
-                        val path = fdField.get(fis) as? String
-                        if (path == "/proc/self/maps") {
-                            val virtualMaps = getVirtualProcessMemoryMap(Process.myPid())
-                            frame.result = virtualMaps.toByteArray(Charsets.UTF_8)
-                            Log.d(TAG, "Replaced /proc/self/maps read with virtual map")
-                        }
-                    } catch (_: NoSuchFieldException) {
-                        // Path field not available on this Android version — skip
-                    }
-                }
-            )
-
-            if (readResult.isSuccess) {
-                installedHookIds.addAll(readResult.getOrDefault(emptyList()))
-                Log.d(TAG, "hookProcSelfMaps (read fallback) installed")
-                return Result.success("gg_compat_proc_maps_read")
-            }
-
-            return Result.failure(
-                result.exceptionOrNull()
-                    ?: RuntimeException("Failed to hook /proc/self/maps")
-            )
+        if (ctorResult.isSuccess) {
+            installedHookIds.add(ctorResult.getOrThrow())
         }
 
-        installedHookIds.add(result.getOrThrow())
-        Log.d(TAG, "hookProcSelfMaps installed: ${result.getOrThrow()}")
-        return Result.success(result.getOrThrow())
+        // Hook FileInputStream.read(byte[], int, int) — the main read method.
+        // If the stream was opened for /proc/self/maps, replace the output
+        // with our virtual maps content.
+        val readResult = HookManager.hookMethod(
+            className = "java.io.FileInputStream",
+            methodName = "read",
+            paramTypes = arrayOf(ByteArray::class.java, Int::class.java, Int::class.java),
+            beforeHook = null,
+            afterHook = { frame ->
+                val fis = frame.thisObject ?: return@hookMethod
+                if (trackedStreams[fis] != true) return@hookMethod
+
+                val virtualMaps = getVirtualProcessMemoryMap(Process.myPid())
+                val bytes = virtualMaps.toByteArray(Charsets.UTF_8)
+                val buf = frame.args?.getOrNull(0) as? ByteArray ?: return@hookMethod
+                val offset = frame.args?.getOrNull(1) as? Int ?: 0
+                val len = minOf(frame.args?.getOrNull(2) as? Int ?: bytes.size, bytes.size, buf.size - offset)
+                if (len > 0) {
+                    System.arraycopy(bytes, 0, buf, offset, len)
+                    frame.result = len
+                    Log.d(TAG, "Replaced /proc/self/maps read with virtual map ($len bytes)")
+                } else {
+                    frame.result = -1 // EOF
+                }
+                // Remove tracking after first read to avoid repeated substitution
+                trackedStreams.remove(fis)
+            }
+        )
+
+        return if (readResult.isSuccess) {
+            installedHookIds.add(readResult.getOrThrow())
+            Log.d(TAG, "hookProcSelfMaps installed successfully")
+            Result.success("gg_compat_proc_maps")
+        } else {
+            Log.e(TAG, "Failed to hook FileInputStream.read for /proc/self/maps")
+            Result.failure(readResult.exceptionOrNull() ?: RuntimeException("hookProcSelfMaps failed"))
+        }
     }
 
     /**

@@ -6,6 +6,7 @@ import android.content.Intent
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.atlas.virtualspace.core.engine.VirtualEngine
+import com.atlas.virtualspace.core.engine.VirtualEngineService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -18,19 +19,11 @@ import timber.log.Timber
  * Broadcast receiver that starts the virtual engine after the device
  * finishes booting, but only if the user has enabled auto-start in
  * settings.
- *
- * Registered in AndroidManifest.xml for `BOOT_COMPLETED` and
- * `LOCKED_BOOT_COMPLETED` broadcasts.
- *
- * Reads the auto-start preference directly from DataStore without
- * Hilt injection, because BroadcastReceiver's goAsync() + Hilt
- * injection can be fragile on some OEMs.
  */
 class BootCompletedReceiver : BroadcastReceiver() {
 
-    private val Context.atlasDataStore by preferencesDataStore(
-        name = "atlas_settings",
-    )
+    // Use the same DataStore name as SettingsViewModel to share preferences.
+    private val Context.atlasDataStore by preferencesDataStore(name = "atlas_settings")
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -43,7 +36,6 @@ class BootCompletedReceiver : BroadcastReceiver() {
 
         Timber.i("Boot broadcast received: %s", intent.action)
 
-        // Use goAsync() to extend the receiver's lifecycle for async work
         val pendingResult = goAsync()
 
         scope.launch {
@@ -58,16 +50,11 @@ class BootCompletedReceiver : BroadcastReceiver() {
                     return@launch
                 }
 
-                Timber.i("Auto-start enabled — initializing virtual engine on boot")
-                val result = VirtualEngine.initialize(context)
-                if (result.isFailure) {
-                    Timber.e(
-                        result.exceptionOrNull(),
-                        "Failed to initialize virtual engine on boot"
-                    )
-                } else {
-                    Timber.i("Virtual engine initialized successfully on boot")
-                }
+                Timber.i("Auto-start enabled — starting VirtualEngineService on boot")
+                // Start via service (which handles VirtualEngine.initialize internally)
+                // rather than calling VirtualEngine.initialize() directly, so the
+                // foreground service lifecycle is properly managed.
+                VirtualEngineService.start(context)
             } catch (e: Exception) {
                 Timber.e(e, "Error during boot receiver processing")
             } finally {

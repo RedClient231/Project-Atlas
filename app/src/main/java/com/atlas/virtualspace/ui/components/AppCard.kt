@@ -166,7 +166,13 @@ fun AppCard(
                     modifier = Modifier.weight(1f),
                 ) {
                     Text(
-                        text = stringResource(R.string.action_launch),
+                        // Show "Install & Launch" the first time (app not yet on device).
+                        // After the first successful install this becomes plain "Launch".
+                        text = if (app.isInstalledOnDevice) {
+                            stringResource(R.string.action_launch)
+                        } else {
+                            stringResource(R.string.action_install_and_launch)
+                        },
                         style = MaterialTheme.typography.labelMedium,
                     )
                 }
